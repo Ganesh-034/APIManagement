@@ -1,0 +1,81 @@
+<policies>
+    <inbound>
+        <base />
+        <!-- CORS: allow preflight, expose rate-limit headers to the browser -->
+        <cors>
+            <allowed-origins>
+                <origin>https://demo.soc-watchtower.com</origin>
+            </allowed-origins>
+            <allowed-methods>
+    		    <method>GET</method>
+    		    <method>POST</method>
+    		    <method>PUT</method>
+    		    <method>DELETE</method>
+    		    <method>PATCH</method>
+    		    <method>OPTIONS</method>
+    		    <method>HEAD</method>
+	        </allowed-methods>
+            <allowed-headers>
+                <header>Authorization</header>
+                <header>Content-Type</header>
+                <header>Origin</header>
+                <header>Accept</header>
+                <header>User-Agent</header>
+                <header>x-requested-with</header>
+            </allowed-headers>
+            <expose-headers>
+                <header>X-RateLimit-Remaining</header>
+                <header>X-RateLimit-Total</header>
+                <header>Retry-After</header>
+            </expose-headers>
+        </cors>
+        <!-- Validate JWT -->
+        <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized. Access token is missing or invalid.">
+            <openid-config url="https://login.microsoftonline.com/fe8c6234-bf85-48c7-b462-1eefe98d567d/v2.0/.well-known/openid-configuration" />
+            <audiences>
+                <audience>481b1a97-87dc-412c-a4e5-fc6b0523ca1f</audience>
+            </audiences>
+            <issuers>
+                <issuer>https://login.microsoftonline.com/fe8c6234-bf85-48c7-b462-1eefe98d567d/v2.0</issuer>
+            </issuers>
+            <required-claims>
+                <claim name="scp">
+                    <value>access_as_user</value>
+                </claim>
+            </required-claims>
+        </validate-jwt>
+        <!-- Per-subject limiter with explicit Retry-After header -->
+        <rate-limit-by-key calls="60" renewal-period="60" counter-key="@(
+          context.Request.Headers.GetValueOrDefault("Authorization","").AsJwt()?.Subject ?? "anon"
+        )" retry-after-header-name="Retry-After" remaining-calls-header-name="X-RateLimit-Remaining" total-calls-header-name="X-RateLimit-Total" />
+        <!-- Optional: different limits by role or claim -->
+        <!--
+    <set-variable name="role" value="@(
+      context.Request.Headers.GetValueOrDefault("Authorization","").AsJwt()?.Claims.GetValueOrDefault("roles")?.FirstOrDefault()
+    )" />
+    <choose>
+      <when condition="@( (string)context.Variables.GetValueOrDefault<string>("role") == "premium" )">
+        <rate-limit-by-key calls="120" renewal-period="60"
+          counter-key="@(
+            context.Request.Headers.GetValueOrDefault("Authorization","").AsJwt()?.Subject ?? "anon"
+          )" />
+      </when>
+      <otherwise>
+        <rate-limit-by-key calls="60" renewal-period="60"
+          counter-key="@(
+            context.Request.Headers.GetValueOrDefault("Authorization","").AsJwt()?.Subject ?? "anon"
+          )" />
+      </otherwise>
+    </choose>
+    -->
+    </inbound>
+    <backend>
+        <base />
+    </backend>
+    <outbound>
+        <base />
+    </outbound>
+    <on-error>
+        <base />
+    </on-error>
+</policies>​
