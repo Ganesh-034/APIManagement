@@ -1,0 +1,122 @@
+// openapi/generate-spec.js
+import swaggerJsdoc from 'swagger-jsdoc';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const outputPath = path.join(__dirname, 'openapi.json');
+
+const options = {
+  definition: {
+    openapi: '3.0.1',
+    info: {
+      title: 'soc-watchtower-backend-dev',
+      description: '',
+      version: '1.0',
+    },
+    servers: [
+      {
+        url: 'https://soc-watchtower-api.azure-api.net/dev-test',
+      },
+    ],
+    components: {
+      securitySchemes: {
+        apiKeyHeader: {
+          type: 'apiKey',
+          name: 'Ocp-Apim-Subscription-Key',
+          in: 'header',
+        },
+        apiKeyQuery: {
+          type: 'apiKey',
+          name: 'subscription-key',
+          in: 'query',
+        },
+      },
+    },
+    security: [{ apiKeyHeader: [] }, { apiKeyQuery: [] }],
+  },
+  // Adjust this path if your route files live somewhere other than src/routes/
+  // .replace(...) fixes Windows backslash paths breaking the ** glob pattern
+  apis: [path.join(__dirname, '../src/routes/**/*.js').replace(/\\/g, '/')],
+};
+
+const newSpec = swaggerJsdoc(options);
+const newPaths = newSpec.paths || {};
+
+// ---- Load the previous spec (if it exists) to compare against ----
+let oldPaths = {};
+let isFirstRun = true;
+if (fs.existsSync(outputPath)) {
+  isFirstRun = false;
+  try {
+    const oldSpec = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+    oldPaths = oldSpec.paths || {};
+  } catch (err) {
+    console.warn('⚠️  Could not read/parse existing openapi.json — treating this as a first run.');
+    isFirstRun = true;
+  }
+}
+
+// ---- Compare old vs new, path by path ----
+const added = [];
+const removed = [];
+const changed = [];
+const unchanged = [];
+
+const allPathKeys = new Set([...Object.keys(oldPaths), ...Object.keys(newPaths)]);
+
+for (const key of allPathKeys) {
+  const inOld = Object.prototype.hasOwnProperty.call(oldPaths, key);
+  const inNew = Object.prototype.hasOwnProperty.call(newPaths, key);
+
+  if (inNew && !inOld) {
+    added.push(key);
+  } else if (inOld && !inNew) {
+    removed.push(key);
+  } else {
+    // Present in both — compare content
+    const same = JSON.stringify(oldPaths[key]) === JSON.stringify(newPaths[key]);
+    if (same) {
+      unchanged.push(key);
+    } else {
+      changed.push(key);
+    }
+  }
+}
+
+const hasChanges = added.length > 0 || removed.length > 0 || changed.length > 0;
+
+// ---- Report ----
+console.log('');
+if (isFirstRun) {
+  console.log(`✅ First run — generated spec with ${Object.keys(newPaths).length} path(s).`);
+} else if (!hasChanges) {
+  console.log('✅ No changes detected — openapi.json left untouched.');
+  console.log(`   ${unchanged.length} path(s) checked, all identical to last run.`);
+} else {
+  console.log('✅ Changes detected — openapi.json updated.');
+  if (added.length) {
+    console.log(`\n   + Added (${added.length}):`);
+    added.forEach((p) => console.log(`     ${p}`));
+  }
+  if (removed.length) {
+    console.log(`\n   - Removed (${removed.length}):`);
+    removed.forEach((p) => console.log(`     ${p}`));
+  }
+  if (changed.length) {
+    console.log(`\n   ~ Changed (${changed.length}):`);
+    changed.forEach((p) => console.log(`     ${p}`));
+  }
+  console.log(`\n   ${unchanged.length} path(s) unchanged.`);
+}
+console.log(`\n   Total paths now: ${Object.keys(newPaths).length}`);
+console.log('');
+
+// ---- Only write the file if this is the first run or something actually changed ----
+if (isFirstRun || hasChanges) {
+  fs.writeFileSync(outputPath, JSON.stringify(newSpec, null, 2));
+  console.log(`📝 Written to ${outputPath}`);
+} else {
+  console.log('📄 File not rewritten (no changes).');
+}​
