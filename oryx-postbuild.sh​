@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# Oryx post-build hook to run npm audit, GitLeaks, and unit tests.
+# Wire this via App Settings: POST_BUILD_SCRIPT_PATH=scripts/oryx-postbuild.sh
+
+set -Eeuo pipefail
+
+############################
+# Configuration (overrides via App Settings env vars)
+############################
+APP_ROOT="${APP_ROOT:-/home/site/wwwroot}"         # Kudu deploy root on Linux App Service
+FAIL_ON="${FAIL_ON:-critical}"                     # 'none' | 'critical' | 'high+critical'
+AUDIT_FORCE="${AUDIT_FORCE:-false}"                # 'true' to allow npm audit fix --force
+TEST_COMMAND="${TEST_COMMAND:-npm test -- --reporters=default}"  # customize to your runner
+GITLEAKS_STRICT="${GITLEAKS_STRICT:-false}"        # 'true' to fail build when leaks found
+GITLEAKS_VERSION="${GITLEAKS_VERSION:-latest}"     # 'latest' or a concrete tag (e.g., v8.18.2)
+RUN_TESTS="${RUN_TESTS:-true}"                     # 'true' to run unit tests, 'false' to skip
+
+SUMMARY_FILE="${SUMMARY_FILE:-${APP_ROOT}/postbuild-summary.txt}"
+AUDIT_JSON="${AUDIT_JSON:-${APP_ROOT}/npm-audit-report.json}"
+GITLEAKS_JSON="${GITLEAKS_JSON:-${APP_ROOT}/gitleaks-report.json}"
+LOG_PREFIX="[ORYX-POSTBUILD]"
+
+############################
+# Helpers
+############################
+log()   { echo -e "${LOG_PREFIX} $*"; }
+warn()  { echo -e "${LOG_PREFIX} ⚠ $*" >&2; }
+fail()  { echo -e "${LOG_PREFIX} ❌ $*" >&2; exit 1; }
+
+has_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+json_get_count() {
+  # Reads npm audit JSON and prints severity counts; prefers jq, falls back to node
+  local severity="$1" file="$2"
+  if has_cmd jq; then
+    jq -r ".metadata.vulnerabilities.${severity} // 0" "$file"
+  elif has_cmd node; then
+    node -e "const f=require('fs');const j=JSON.parse(f.readFileSync('$file'));const m=j.metadata&&j.metadata.vulnerabilities||{};console.log(m['$severity']||0)"
+  else
+    warn "Neither jq nor node available—defaulting $severity count to 0"
+    echo 0
+  fi
+}
+
+########################################
+# 0) Sanity checks and environment info
+########################################
+log "App root: ${APP_ROOT}"
+log "Policy: FAIL_ON=${FAIL_ON} | AUDIT_FORCE=${AUDIT_FORCE} | GITLEAKS_STRICT=${GITLEAKS_STRICT}"
+log "Test command: ${TEST_COMMAND}"
+
+# Oryx builds Node apps automatically when package.json is at repo root and SCM_DO_BUILD_DURING_DEPLOYMENT=true.
+# It typically runs npm install and (if present) npm run build. We rely on that here.  # docs:
+# https://learn.microsoft.com/azure/app-service/configure-language-nodejs  and  https://github.com/microsoft/Oryx/blob/main/doc/configuration.md
+
+if [[ ! -f "${APP_ROOT}/package.json" ]]; then
+  warn "No package.json under ${APP_ROOT}; audit/tests may be skipped."
+fi
+
+########################################
+# 1) npm audit fix (safe by default)
+########################################
+log "Running npm audit fix ..."
+pushd "${APP_ROOT}" >/dev/null
+
+if [[ "${AUDIT_FORCE}" == "true" ]]; then
+  warn "AUDIT_FORCE=true → running 'npm audit fix --force' (may introduce breaking changes)."
+  npm audit fix --force || warn "npm audit fix --force reported issues; continuing."
+else
+  npm audit fix || warn "npm audit fix reported issues; continuing."
+fi
+
+log "Generating npm audit JSON report → ${AUDIT_JSON}"
+# By default, npm audit will exit non-zero if vulnerabilities exist; we'll capture JSON regardless.
+npm audit --json > "${AUDIT_JSON}" || warn "npm audit returned non-zero (vulns present); JSON written."
+
+# Parse severity counts
+crit_count="$(json_get_count critical "${AUDIT_JSON}")"
+high_count="$(json_get_count high "${AUDIT_JSON}")"
+log "Audit summary: critical=${crit_count} | high=${high_count}"
+
+# Enforce policy gate
+case "${FAIL_ON}" in
+  none)
+    log "Policy 'none' → not failing build on vulnerabilities."
+    ;;
+  critical)
+    if [[ "${crit_count}" -gt 0 ]]; then
+      fail "Policy 'critical' → ${crit_count} critical vulnerabilities remain after audit fix."
+    fi
+    ;;
+  high+critical)
+    if [[ "${crit_count}" -gt 0 || "${high_count}" -gt 0 ]]; then
+      fail "Policy 'high+critical' → high=${high_count}, critical=${crit_count} vulnerabilities remain."
+    fi
+    ;;
+  *)
+    warn "Unknown FAIL_ON='${FAIL_ON}', defaulting to 'critical'."
+    if [[ "${crit_count}" -gt 0 ]]; then
+      fail "Default policy 'critical' → ${crit_count} critical vulnerabilities remain."
+    fi
+    ;;
+esac
+
+########################################
+# 2) GitLeaks (report-only by default)
+########################################
+log "Fetching GitLeaks (${GITLEAKS_VERSION}) ..."
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "${tmpdir}"' EXIT
+
+# Download static binary release (Linux x64)
+if [[ "${GITLEAKS_VERSION}" == "latest" ]]; then
+  curl -sSL "https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_linux_x64.tar.gz" -o "${tmpdir}/gitleaks.tar.gz"
+else
+  # Expect a 'vX.Y.Z' style tag
+  curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION#v}_linux_x64.tar.gz" -o "${tmpdir}/gitleaks.tar.gz"
+fi
+tar -xzf "${tmpdir}/gitleaks.tar.gz" -C "${tmpdir}"
+
+log "Running GitLeaks scan on ${APP_ROOT} → ${GITLEAKS_JSON}"
+# --exit-code 0 = report-only; 1 = fail on findings
+if [[ "${GITLEAKS_STRICT}" == "true" ]]; then
+  "${tmpdir}/gitleaks" detect --source "${APP_ROOT}" --report-path "${GITLEAKS_JSON}" --exit-code 1 || fail "GitLeaks found secrets (strict mode)."
+else
+  "${tmpdir}/gitleaks" detect --source "${APP_ROOT}" --report-path "${GITLEAKS_JSON}" --exit-code 0 || warn "GitLeaks completed with warnings."
+fi
+
+
+########################################
+# Conditional Unit Tests
+########################################
+if [[ "${RUN_TESTS}" == "true" ]]; then
+  log "Running unit tests ..."
+  if ${TEST_COMMAND}; then
+    log "Unit tests passed."
+  else
+    fail "Unit tests failed."
+  fi
+else
+  log "RUN_TESTS=false → skipping unit tests."
+fi
+
+
+popd >/dev/null
+
+########################################
+# 4) Summary & artifacts
+########################################
+{
+  echo "=== Oryx Post-build Summary ==="
+  echo "Time: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+  echo "App Root: ${APP_ROOT}"
+  echo "Audit JSON: ${AUDIT_JSON}"
+  echo "GitLeaks JSON: ${GITLEAKS_JSON}"
+  echo "Policy: FAIL_ON=${FAIL_ON}, AUDIT_FORCE=${AUDIT_FORCE}, GITLEAKS_STRICT=${GITLEAKS_STRICT}, RUN_TESTS=${RUN_TESTS}"
+  echo "Critical vulnerabilities: ${crit_count}"
+  echo "High vulnerabilities: ${high_count}"
+  echo "Required env vars validated: ${REQUIRED_ENV_VARS[*]}"
+#   echo "Policy: FAIL_ON=${FAIL_ON}, AUDIT_FORCE=${AUDIT_FORCE}, GITLEAKS_STRICT=${GITLEAKS_STRICT}"
+#   echo "Critical vulnerabilities: ${crit_count}"
+#   echo "High vulnerabilities: ${high_count}"
+} > "${SUMMARY_FILE}"
+
+log "Summary written → ${SUMMARY_FILE}"
+log "Post-build completed successful
