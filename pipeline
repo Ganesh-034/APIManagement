@@ -1,0 +1,2541 @@
+  trigger:
+    branches:
+      include:
+        - development
+        - feature/apim
+    paths:
+      include:
+        - src/**
+        - Dockerfile
+        - package*.json
+  pr:
+    branches:
+      include:
+        - development
+        - feature/apim
+  pool:
+    vmImage: ubuntu-latest
+  variables:
+    azureSubscription: AzureServiceConnection
+    apimResourceGroup: soc-watchtower-prod
+    apimServiceName: soc-watchtower-api
+    apimApiId: soc-watchtower-backend-dev-test
+    apimApiPath: dev-test
+    nodeVersion: 22.x
+    minCodeCoverage: 80
+    gitleaksVersion: v8.18.3
+    EnableCodeQuality: "false"
+    EnableUnitTests: "false"
+    EnableNpmAudit: "false"
+    EnableMSDO: "false"
+    EnableGitLeaks: "false"
+    EnableTrivy: "false"
+    
+    watchtower.rgName: soc-watchtower-dev
+    watchtower.appName: soc-watchtower-backend-dev
+    watchtower.appUrl: "https://soc-watchtower-backend-dev-epfsh5f4fcbgbsd4.southeastasia-01.azurewebsites.net"
+    watchtower.registryName: acrsocwatchtowerbackenddev
+    watchtower.containerRepository: soc-watchtower-backend
+    watchtower.dockerfilePath: Dockerfile
+    watchtower.appPort: "5000"
+    watchtower.smokeTestPath: /health
+    
+    presidio.rgName: soc-watchtower-dev
+    presidio.appName: presidio-webapi
+    presidio.registryName: acrsocwatchtowerbackenddev
+    presidio.containerRepository: presidioapp
+    presidio.dockerfilePath: src/services/security/presidio/Dockerfile
+    presidio.appPort: "86"
+    presidio.smokeTestPath: /health
+
+  stages:
+    - stage: DetectChanges
+      displayName: Detect Changes
+      jobs:
+        - job: PathAnalysis
+          displayName: Analyze Paths
+          steps:
+            - checkout: self
+              fetchDepth: 0
+            - bash: >
+                set -euo pipefail
+
+
+                echo "=============================================="
+
+                echo "   DEVELOPMENT BRANCH"
+
+                echo "   Quality checks are INFORMATIONAL"
+
+                echo "=============================================="
+
+                echo ""
+
+
+                # Get changed files
+
+                if [ "$(Build.Reason)" == "PullRequest" ]; then
+                  BASE_COMMIT="origin/development"
+                  git fetch origin development 2>/dev/null || true
+                else
+                  BASE_COMMIT="HEAD~1"
+                  git rev-parse HEAD~1 >/dev/null 2>&1 || BASE_COMMIT=""
+                fi
+
+
+                CHANGED_FILES=""
+
+                [ -n "${BASE_COMMIT}" ] && CHANGED_FILES=$(git diff --name-only ${BASE_COMMIT} HEAD 2>/dev/null || echo "")
+
+
+                # Decide what to build
+
+                if [ -z "${CHANGED_FILES}" ] || [ "$(Build.Reason)" == "Manual" ]; then
+                  echo "Building ALL services"
+                  echo "##vso[task.setvariable variable=deployWatchtower;isOutput=true]true"
+                  echo "##vso[task.setvariable variable=deployPresidio;isOutput=true]true"
+                else
+                  DEPLOY_WATCHTOWER=false
+                  DEPLOY_PRESIDIO=false
+                  
+                  while IFS= read -r file; do
+                    # Watchtower
+                    if [[ "$file" =~ ^src/(controllers|models|routes|utils|middleware|config)/ ]] || \
+                      [[ "$file" =~ ^src/services/ && ! "$file" =~ ^src/services/security/ ]] || \
+                      [[ "$file" == "src/app.js" ]] || \
+                      [[ "$file" == "package.json" ]] || \
+                      [[ "$file" == "Dockerfile" ]]; then
+                      DEPLOY_WATCHTOWER=true
+                    fi
+                    
+                    # Presidio
+                    [[ "$file" =~ ^src/services/security/ ]] && DEPLOY_PRESIDIO=true
+                  done <<< "$CHANGED_FILES"
+                  
+                  echo "Watchtower: ${DEPLOY_WATCHTOWER}"
+                  echo "Presidio: ${DEPLOY_PRESIDIO}"
+                  
+                  echo "##vso[task.setvariable variable=deployWatchtower;isOutput=true]${DEPLOY_WATCHTOWER}"
+                  echo "##vso[task.setvariable variable=deployPresidio;isOutput=true]${DEPLOY_PRESIDIO}"
+                fi
+              name: DetectPaths
+              displayName: Detect Paths
+    - stage: CodeQuality
+      displayName: Code Quality
+      dependsOn: DetectChanges
+      condition: |
+        and(
+          succeeded(),
+          eq(variables['EnableCodeQuality'], 'true')
+        )
+      jobs:
+        - job: ESLint
+          displayName: ESLint
+          steps:
+            - checkout: self
+            - task: NodeTool@0
+              inputs:
+                versionSpec: $(nodeVersion)
+              displayName: Install Node.js
+            - bash: >
+                set -euo pipefail
+
+
+                echo "Installing dependencies..."
+
+                npm ci
+
+
+                # Check if ESLint config exists
+
+                if [ ! -f ".eslintrc.js" ] && [ ! -f ".eslintrc.json" ] && [ ! -f ".eslintrc.yml" ] && [ ! -f "eslint.config.js" ]; then
+                  echo "No ESLint configuration found"
+                  echo "##vso[task.logissue type=warning]No ESLint configuration found"
+                  
+                  # Create empty report for artifact publishing
+                  mkdir -p reports
+                  echo '{"status":"skipped","reason":"No ESLint configuration found"}' > reports/eslint.json
+                  exit 0
+                fi
+
+
+                # Ensure reports directory exists
+
+                mkdir -p reports
+
+
+                echo "Running ESLint..."
+
+
+                # Run ESLint with JSON output
+
+                npx eslint "src/**/*.{js,ts}" \
+                  --format json \
+                  --output-file reports/eslint.json 2>&1 || ESLINT_EXIT=$?
+
+                # Ensure file was created (even if ESLint failed)
+
+                if [ ! -f reports/eslint.json ]; then
+                  echo '[]' > reports/eslint.json
+                fi
+
+
+                # Also show console output
+
+                npx eslint "src/**/*.{js,ts}" --format stylish || true
+
+
+                # Parse and report results
+
+                if [ -f reports/eslint.json ]; then
+                  ERRORS=$(jq '[.[] | .errorCount] | add // 0' reports/eslint.json 2>/dev/null || echo "0")
+                  WARNINGS=$(jq '[.[] | .warningCount] | add // 0' reports/eslint.json 2>/dev/null || echo "0")
+                  
+                  echo ""
+                  echo "======================================"
+                  echo "ESLint Results:"
+                  echo "  Errors:   ${ERRORS}"
+                  echo "  Warnings: ${WARNINGS}"
+                  echo "======================================"
+                  
+                  if [ "${ERRORS}" != "0" ] && [ "${ERRORS}" -gt 0 ]; then
+                    echo "##vso[task.logissue type=warning]ESLint found ${ERRORS} error(s) - NOT BLOCKING"
+                  fi
+                  
+                  if [ "${WARNINGS}" != "0" ] && [ "${WARNINGS}" -gt 0 ]; then
+                    echo "##vso[task.logissue type=warning]ESLint found ${WARNINGS} warning(s)"
+                  fi
+                fi
+
+
+                echo ""
+
+                echo "✓ ESLint check completed (informational)"
+              displayName: Run ESLint
+              continueOnError: true
+            - task: PublishPipelineArtifact@1
+              condition: always()
+              inputs:
+                targetPath: $(System.DefaultWorkingDirectory)/reports/eslint.json
+                artifactName: eslint-report
+              displayName: Publish ESLint Report
+        - job: Prettier
+          displayName: Prettier
+          steps:
+            - checkout: self
+            - task: NodeTool@0
+              inputs:
+                versionSpec: $(nodeVersion)
+              displayName: Install Node.js
+            - bash: >
+                set -euo pipefail
+
+
+                echo "Installing dependencies..."
+
+                npm ci
+
+
+                # Ensure reports directory exists
+
+                mkdir -p reports
+
+
+                # Check if Prettier config exists
+
+                if [ ! -f ".prettierrc" ] && [ ! -f ".prettierrc.json" ] && [ ! -f ".prettierrc.yml" ] && [ ! -f "prettier.config.js" ]; then
+                  echo "No Prettier configuration found, using defaults"
+                fi
+
+
+                echo "Running Prettier check..."
+
+
+                # Run Prettier and capture output
+
+                npx prettier --check "src/**/*.{js,ts,json}" > reports/prettier.txt 2>&1 || PRETTIER_EXIT=$?
+
+
+                # Ensure file exists
+
+                if [ ! -f reports/prettier.txt ]; then
+                  echo "No output from Prettier" > reports/prettier.txt
+                fi
+
+
+                # Show output
+
+                cat reports/prettier.txt
+
+
+                if [ "${PRETTIER_EXIT:-0}" -ne 0 ]; then
+                  echo ""
+                  echo "##vso[task.logissue type=warning]Formatting issues detected - NOT BLOCKING"
+                  echo ""
+                  echo "To fix: npx prettier --write "src/**/*.{js,ts,json}""
+                else
+                  echo ""
+                  echo "✓ All files properly formatted"
+                fi
+              displayName: Run Prettier
+              continueOnError: true
+            - task: PublishPipelineArtifact@1
+              condition: always()
+              inputs:
+                targetPath: $(System.DefaultWorkingDirectory)/reports/prettier.txt
+                artifactName: prettier-report
+              displayName: Publish Prettier Report
+    
+    - stage: UnitTests
+      displayName: Unit Tests
+      dependsOn: DetectChanges
+      condition: |
+        and(
+          succeeded(),
+          eq(variables['EnableUnitTests'], 'true')
+        )
+      jobs:
+        - job: Tests
+          displayName: Run Tests
+          timeoutInMinutes: 10
+          steps:
+            - checkout: self
+              fetchDepth: 1
+              
+            - task: NodeTool@0
+              inputs:
+                versionSpec: $(nodeVersion)
+              displayName: Install Node.js
+              
+            - bash: |
+                # Get npm cache directory
+                NPM_CACHE_DIR=$(npm config get cache)
+                echo "NPM Cache Directory: ${NPM_CACHE_DIR}"
+                echo "##vso[task.setvariable variable=NPM_CACHE_FOLDER]${NPM_CACHE_DIR}"
+              displayName: Get npm cache directory
+              
+            - task: Cache@2
+              displayName: Cache npm
+              inputs:
+                key: 'npm | "$(Agent.OS)" | package-lock.json'
+                restoreKeys: |
+                  npm | "$(Agent.OS)"
+                path: $(NPM_CACHE_FOLDER)
+              continueOnError: true
+                
+            - task: Cache@2
+              displayName: Cache Jest
+              inputs:
+                key: 'jest | "$(Agent.OS)" | package-lock.json'
+                restoreKeys: |
+                  jest | "$(Agent.OS)"
+                path: $(System.DefaultWorkingDirectory)/.jest-cache
+              continueOnError: true
+              
+            - bash: |
+                set -euo pipefail
+                
+                echo "======================================"
+                echo "Installing Dependencies"
+                echo "======================================"
+                
+                npm ci --prefer-offline --no-audit --no-fund
+                
+                if ! npm list jest-junit --depth=0 > /dev/null 2>&1; then
+                  npm install --save-dev --no-save jest-junit
+                fi
+                
+                echo "✓ Dependencies installed"
+              displayName: Install Dependencies
+              
+            - bash: |
+                set -euo pipefail
+
+                echo "======================================"
+                echo "Running Unit Tests (ES Modules)"
+                echo "======================================"
+                
+                mkdir -p test-results coverage
+
+                # Check environment
+                NODE_VERSION=$(node --version)
+                echo "Node.js version: ${NODE_VERSION}"
+                echo ""
+
+                # Verify package.json configuration
+                if grep -q '"type": "module"' package.json; then
+                  echo "✓ ES Modules enabled in package.json"
+                fi
+
+                if grep -q 'test:ci' package.json; then
+                  echo "✓ test:ci script found"
+                fi
+                echo ""
+
+                # ✅ Use npm script instead of direct npx jest
+                echo "Discovering tests..."
+                npm run test:ci -- --listTests 2>&1 | tee test-list.txt
+                
+                TEST_COUNT=$(cat test-list.txt | grep -c "\.test\.js\|\.spec\.js" || echo "0")
+                
+                if [ "$TEST_COUNT" -eq 0 ]; then
+                  echo "##vso[task.logissue type=error]No tests discovered"
+                  exit 1
+                fi
+                
+                echo ""
+                echo "✓ Jest discovered ${TEST_COUNT} test file(s)"
+                echo ""
+                
+                # Show sample test files
+                echo "Sample test files:"
+                grep "\.test\.js\|\.spec\.js" test-list.txt | head -5
+                if [ "$TEST_COUNT" -gt 5 ]; then
+                  echo "... and $((TEST_COUNT - 5)) more"
+                fi
+                echo ""
+
+                # Determine workers
+                CPU_COUNT=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
+                WORKER_COUNT=$((CPU_COUNT > 4 ? CPU_COUNT / 2 : CPU_COUNT))
+                echo "Using ${WORKER_COUNT} workers (${CPU_COUNT} CPUs available)"
+                echo ""
+
+                # ✅ Run tests using npm script (already has NODE_OPTIONS configured)
+                echo "Starting test execution..."
+                START=$(date +%s)
+                
+                npm run test:ci -- \
+                  --coverage \
+                  --maxWorkers=${WORKER_COUNT} \
+                  --colors \
+                  2>&1 | tee test-output.log
+                
+                TEST_EXIT=$?
+
+                END=$(date +%s)
+                DURATION=$((END - START))
+                
+                echo ""
+                echo "======================================"
+                echo "Tests completed in ${DURATION}s"
+                echo "======================================"
+
+                # Validate junit.xml exists
+                if [ ! -f test-results/junit.xml ]; then
+                  echo ""
+                  echo "##vso[task.logissue type=error]junit.xml not found"
+                  echo "Expected location: test-results/junit.xml"
+                  
+                  # Search for it
+                  echo ""
+                  echo "Searching for junit.xml..."
+                  find . -name "junit.xml" -type f 2>/dev/null | head -5
+                  
+                  exit 1
+                fi
+
+                # Parse test results
+                FILE_SIZE=$(stat -c%s test-results/junit.xml 2>/dev/null || stat -f%z test-results/junit.xml 2>/dev/null || echo "0")
+                echo ""
+                echo "✓ Test results file (${FILE_SIZE} bytes)"
+                
+                if command -v xmllint > /dev/null 2>&1; then
+                  TOTAL=$(xmllint --xpath 'string(//testsuites/@tests)' test-results/junit.xml 2>/dev/null || echo "0")
+                  FAILURES=$(xmllint --xpath 'string(//testsuites/@failures)' test-results/junit.xml 2>/dev/null || echo "0")
+                  ERRORS=$(xmllint --xpath 'string(//testsuites/@errors)' test-results/junit.xml 2>/dev/null || echo "0")
+                  SKIPPED=$(xmllint --xpath 'string(//testsuites/@skipped)' test-results/junit.xml 2>/dev/null || echo "0")
+                  
+                  PASSED=$((TOTAL - FAILURES - ERRORS - SKIPPED))
+                  
+                  echo ""
+                  echo "Test Summary:"
+                  echo "  Total:    ${TOTAL}"
+                  echo "  Passed:   ${PASSED}"
+                  echo "  Failed:   ${FAILURES}"
+                  echo "  Errors:   ${ERRORS}"
+                  echo "  Skipped:  ${SKIPPED}"
+                fi
+
+                # Validate coverage exists
+                if [ ! -f coverage/coverage-summary.json ]; then
+                  echo ""
+                  echo "##vso[task.logissue type=error]No coverage summary generated"
+                  exit 1
+                fi
+
+                # Parse coverage
+                echo ""
+                echo "======================================"
+                echo "Coverage Summary"
+                echo "======================================"
+                
+                COVERAGE=$(jq -r '.total.lines.pct // "0"' coverage/coverage-summary.json)
+                BRANCHES=$(jq -r '.total.branches.pct // "0"' coverage/coverage-summary.json)
+                FUNCTIONS=$(jq -r '.total.functions.pct // "0"' coverage/coverage-summary.json)
+                STATEMENTS=$(jq -r '.total.statements.pct // "0"' coverage/coverage-summary.json)
+                
+                echo "Lines:      ${COVERAGE}%"
+                echo "Branches:   ${BRANCHES}%"
+                echo "Functions:  ${FUNCTIONS}%"
+                echo "Statements: ${STATEMENTS}%"
+                
+                # Validate coverage is numeric
+                if [[ "${COVERAGE}" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                  COVERAGE_INT=$(printf "%.0f" "${COVERAGE}")
+                  MIN_COVERAGE=70  # From jest.config.js
+                  
+                  if [ "${COVERAGE_INT}" -lt "${MIN_COVERAGE}" ]; then
+                    echo ""
+                    echo "##vso[task.logissue type=error]Coverage ${COVERAGE}% below minimum ${MIN_COVERAGE}%"
+                    echo ""
+                    echo "Note: Build will fail due to coverage threshold"
+                  else
+                    echo ""
+                    echo "✓ Coverage meets minimum requirement (${MIN_COVERAGE}%)"
+                  fi
+                else
+                  echo ""
+                  echo "##vso[task.logissue type=warning]Invalid coverage value: ${COVERAGE}"
+                fi
+
+                # Check for cobertura
+                if [ ! -f coverage/cobertura-coverage.xml ]; then
+                  echo ""
+                  echo "##vso[task.logissue type=warning]cobertura-coverage.xml not found"
+                  echo "Azure DevOps coverage display may not work"
+                else
+                  COB_SIZE=$(stat -c%s coverage/cobertura-coverage.xml 2>/dev/null || stat -f%z coverage/cobertura-coverage.xml 2>/dev/null || echo "0")
+                  echo ""
+                  echo "✓ Cobertura report (${COB_SIZE} bytes)"
+                fi
+
+                # Handle test failures
+                if [ "${TEST_EXIT}" -ne 0 ]; then
+                  echo ""
+                  echo "======================================"
+                  echo "❌ TESTS FAILED"
+                  echo "======================================"
+                  echo ""
+                  
+                  # Show failed test suites
+                  if grep -q "FAIL " test-output.log; then
+                    echo "Failed test suites:"
+                    grep "FAIL " test-output.log | head -20
+                    echo ""
+                  fi
+                  
+                  # Show summary from Jest
+                  if grep -q "Test Suites:" test-output.log; then
+                    echo "Jest Summary:"
+                    grep -A 3 "Test Suites:" test-output.log | tail -4
+                    echo ""
+                  fi
+                  
+                  # Show last lines
+                  echo "Last 50 lines of output:"
+                  tail -50 test-output.log
+                  
+                  exit 1
+                fi
+
+                echo ""
+                echo "======================================"
+                echo "✅ All tests passed!"
+                echo "======================================"
+              displayName: Run Tests
+              env:
+                NODE_ENV: test
+                CI: true
+                
+            - task: PublishTestResults@2
+              condition: always()
+              inputs:
+                testResultsFormat: JUnit
+                testResultsFiles: '**/junit.xml'
+                searchFolder: $(System.DefaultWorkingDirectory)
+                failTaskOnFailedTests: false
+                failTaskOnFailureToPublishResults: false
+                failTaskOnMissingResultsFile: false
+                testRunTitle: 'Unit Tests - $(Build.BuildNumber)'
+                mergeTestResults: true
+                publishRunAttachments: true
+              displayName: Publish Test Results
+              
+            - task: PublishCodeCoverageResults@1
+              condition: always()
+              inputs:
+                codeCoverageTool: Cobertura
+                summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage/cobertura-coverage.xml'
+                reportDirectory: '$(System.DefaultWorkingDirectory)/coverage'
+                failIfCoverageEmpty: false
+              displayName: Publish Coverage
+              continueOnError: true
+
+    - stage: Security
+      displayName: Security
+      dependsOn: DetectChanges
+      jobs:
+        - job: NPMAudit
+          displayName: NPM Audit
+          condition: eq(variables['EnableNpmAudit'], 'true')
+          steps:
+            - checkout: self
+            - task: NodeTool@0
+              inputs:
+                versionSpec: $(nodeVersion)
+              displayName: Install Node.js
+            - bash: >
+                set -euo pipefail
+
+
+                echo "======================================"
+
+                echo "   NPM SECURITY AUDIT"
+
+                echo "======================================"
+
+                echo ""
+
+
+                # Ensure reports directory exists
+
+                mkdir -p reports
+
+
+                echo "Running npm audit..."
+
+                npm audit --json > reports/npm-audit.json 2>&1 || true
+
+
+                # Ensure file exists
+
+                if [ ! -f reports/npm-audit.json ]; then
+                  echo '{"error":"npm audit failed to generate report"}' > reports/npm-audit.json
+                fi
+
+
+                # Parse results
+
+                if jq -e '.metadata' reports/npm-audit.json >/dev/null 2>&1; then
+                  CRITICAL=$(jq '.metadata.vulnerabilities.critical // 0' reports/npm-audit.json)
+                  HIGH=$(jq '.metadata.vulnerabilities.high // 0' reports/npm-audit.json)
+                  MODERATE=$(jq '.metadata.vulnerabilities.moderate // 0' reports/npm-audit.json)
+                  LOW=$(jq '.metadata.vulnerabilities.low // 0' reports/npm-audit.json)
+                  TOTAL=$(jq '.metadata.vulnerabilities.total // 0' reports/npm-audit.json)
+                else
+                  echo "Unable to parse audit results"
+                  CRITICAL=0
+                  HIGH=0
+                  MODERATE=0
+                  LOW=0
+                  TOTAL=0
+                fi
+
+
+                echo "======================================"
+
+                echo "Vulnerability Summary:"
+
+                echo "  Critical:  ${CRITICAL}"
+
+                echo "  High:      ${HIGH}"
+
+                echo "  Moderate:  ${MODERATE}"
+
+                echo "  Low:       ${LOW}"
+
+                echo "  Total:     ${TOTAL}"
+
+                echo "======================================"
+
+                echo ""
+
+
+                if [ "${CRITICAL}" -gt 0 ]; then
+                  echo "##vso[task.logissue type=error]Found ${CRITICAL} CRITICAL vulnerabilities"
+                  exit 1
+                fi
+
+
+                if [ "${HIGH}" -gt 0 ]; then
+                  echo "##vso[task.logissue type=error]Found ${HIGH} HIGH vulnerabilities"
+                  exit 1
+                fi
+
+
+                if [ "${TOTAL}" -gt 0 ]; then
+                  echo ""
+                  echo "Detailed vulnerabilities:"
+                  npm audit || true
+                else
+                  echo "✓ No vulnerabilities found"
+                fi
+              displayName: NPM Audit
+              continueOnError: false
+            - task: PublishPipelineArtifact@1
+              condition: always()
+              inputs:
+                targetPath: $(System.DefaultWorkingDirectory)/reports/npm-audit.json
+                artifactName: npm-audit-report
+              displayName: Publish NPM Audit Report
+        
+        - job: GitLeaks
+          displayName: GitLeaks Secret Scan
+          condition: eq(variables['EnableGitLeaks'], 'true')
+          timeoutInMinutes: 15
+          steps:
+            - checkout: self
+              fetchDepth: 0
+              clean: true
+              persistCredentials: false
+            - bash: >
+                set -euo pipefail
+
+                echo "Installing GitLeaks $(gitleaksVersion)..."
+
+                GITLEAKS_VERSION=$(echo "$(gitleaksVersion)" | sed 's/^v//')
+
+                wget -q "https://github.com/gitleaks/gitleaks/releases/download/$(gitleaksVersion)/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+
+                tar -xzf "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+
+                sudo install -m 755 gitleaks /usr/local/bin/gitleaks
+
+                gitleaks version
+              displayName: Install GitLeaks
+            - bash: >
+                set -euo pipefail
+
+
+                # Force fresh start
+
+                rm -rf reports .gitleaks-cache
+
+                mkdir -p reports
+
+
+                echo "Scanning for secrets..."
+
+                echo "Build: $(Build.BuildId)"
+
+                echo "Commit: $(Build.SourceVersion)"
+
+                echo ""
+
+
+                # Scan without cache
+                echo "================================="
+                echo "Repository Information"
+                echo "================================="
+
+                echo "Build ID: $(Build.BuildId)"
+                echo "Commit: $(Build.SourceVersion)"
+
+                git log --oneline -1
+
+                echo ""
+                echo "README count"
+
+                find . -name "README.md"
+
+                echo ""
+                echo "Root README lines"
+
+                wc -l README.md || true
+
+                gitleaks detect \
+                  --source . \
+                  --config .gitleaks.toml \
+                  --report-path reports/gitleaks.json \
+                  --report-format json \
+                  --no-git \
+                  --redact \
+                  --verbose \
+                  2>&1 | tee reports/gitleaks.log || true
+
+                # Ensure valid JSON
+
+                if [ ! -f reports/gitleaks.json ] || ! jq empty reports/gitleaks.json 2>/dev/null; then
+                  echo '[]' > reports/gitleaks.json
+                fi
+
+
+                # Report results
+
+                LEAK_COUNT=$(jq 'length' reports/gitleaks.json)
+
+                echo "##vso[task.setvariable variable=secretCount;isOutput=true]${LEAK_COUNT}"
+
+
+                if [ "${LEAK_COUNT}" -gt 0 ]; then
+                  echo "Found ${LEAK_COUNT} potential secrets"
+                  jq -r '.[] | "\(.File):\(.StartLine) [\(.RuleID)]"' reports/gitleaks.json
+
+                  echo "##vso[task.logissue type=error]GitLeaks detected secrets"
+                  exit 1
+                else
+                  echo "No secrets detected"
+                fi
+              name: Scan
+              displayName: Scan Repository
+              continueOnError: false
+            - task: PublishPipelineArtifact@1
+              condition: always()
+              inputs:
+                targetPath: $(System.DefaultWorkingDirectory)/reports
+                artifactName: gitleaks-$(Build.BuildId)
+              displayName: Publish Report
+        - job: MSDO
+          displayName: Microsoft Security DevOps
+          condition: eq(variables['EnableMSDO'], 'true')
+          steps:
+            - checkout: self
+            - bash: |
+                echo "======================================"
+                echo "   MICROSOFT SECURITY DEVOPS"
+                echo "======================================"
+                echo ""
+              displayName: MSDO Info
+            - task: MicrosoftSecurityDevOps@1
+              displayName: Run MSDO Analysis
+              continueOnError: true
+              inputs:
+                categories: secrets,code,dependencies,containers,IaC
+                break: false
+            - task: PublishPipelineArtifact@1
+              displayName: Publish MSDO Results
+              condition: always()
+              inputs:
+                targetPath: $(Build.SourcesDirectory)/.gdn
+                artifactName: msdo-results
+    
+    - stage: Build_Watchtower
+      displayName: Build Watchtower
+      dependsOn: 
+        - DetectChanges
+        - Security
+      condition: >
+        and(
+          succeeded(),
+          eq(dependencies.DetectChanges.outputs['PathAnalysis.DetectPaths.deployWatchtower'], 'true')
+        )
+      jobs:
+        - job: Build
+          displayName: Build & Push
+          steps:
+            - checkout: self
+            - task: NodeTool@0
+              inputs:
+                versionSpec: $(nodeVersion)
+              displayName: Install Node.js
+            - bash: |
+                set -euo pipefail
+                npm ci
+                npm run generate-openapi
+                echo "Generated files:"
+                find . -name "*.json" | grep -i openapi || true
+
+                echo ""
+                echo "openAPI folder contents:"
+                ls -la openapi || true
+              displayName: Generate OpenAPI
+
+            - task: PublishPipelineArtifact@1
+              displayName: Publish OpenAPI Files
+              inputs:
+                targetPath: openapi
+                artifactName: openapi-files
+            - bash: |
+                set -euo pipefail
+                echo "Regenerating package-lock.json..."
+                rm -rf node_modules package-lock.json
+                npm install --package-lock-only
+              displayName: Generate Lock File
+            - task: AzureCLI@2
+              name: BuildPush
+              displayName: Build & Push Image
+              condition: false
+              inputs:
+                azureSubscription: $(azureSubscription)
+                scriptType: bash
+                scriptLocation: inlineScript
+                inlineScript: >
+                  set -euo pipefail
+
+
+                  ACR="$(watchtower.registryName)"
+
+                  REPO="$(watchtower.containerRepository)"
+
+                  TAG="$(Build.BuildId)"
+
+                  IMAGE="${ACR}.azurecr.io/${REPO}:${TAG}"
+
+
+                  BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+
+                  GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+
+                  echo "======================================"
+
+                  echo "Building Watchtower Image"
+
+                  echo "======================================"
+
+                  echo "Image: ${IMAGE}"
+
+                  echo "Commit: ${GIT_COMMIT}"
+
+                  echo ""
+
+
+                  az acr login --name "${ACR}"
+
+
+                  docker build \
+                    --build-arg BUILD_DATE="${BUILD_DATE}" \
+                    --build-arg VCS_REF="${GIT_COMMIT}" \
+                    --build-arg VERSION="${TAG}" \
+                    -t "${IMAGE}" \
+                    -f "$(watchtower.dockerfilePath)" \
+                    .
+
+                  docker tag "${IMAGE}" "${ACR}.azurecr.io/${REPO}:latest"
+
+                  docker push "${IMAGE}"
+
+                  docker push "${ACR}.azurecr.io/${REPO}:latest"
+
+
+                  echo ""
+
+                  echo "✓ Build completed"
+
+                  echo "##vso[task.setvariable variable=image;isOutput=true]${IMAGE}"
+    
+    - stage: Build_Presidio
+      displayName: Build Presidio
+      dependsOn: 
+        - DetectChanges
+        - Security
+      condition: >
+        and(
+          succeeded(),
+          eq(dependencies.DetectChanges.outputs['PathAnalysis.DetectPaths.deployPresidio'], 'true')
+        )
+      jobs:
+        - job: Build
+          displayName: Build & Push
+          steps:
+            - checkout: self
+            - task: AzureCLI@2
+              name: BuildPush
+              displayName: Build & Push Image
+              inputs:
+                azureSubscription: $(azureSubscription)
+                scriptType: bash
+                scriptLocation: inlineScript
+                inlineScript: >
+                  set -euo pipefail
+
+
+                  ACR="$(presidio.registryName)"
+
+                  REPO="$(presidio.containerRepository)"
+
+                  TAG="$(Build.BuildId)"
+
+                  IMAGE="${ACR}.azurecr.io/${REPO}:${TAG}"
+
+
+                  BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+
+                  GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+
+                  PRESIDIO_DIR="$(Build.SourcesDirectory)/src/services/security/presidio"
+
+
+                  echo "======================================"
+
+                  echo "Building Presidio Image"
+
+                  echo "======================================"
+
+                  echo "Image: ${IMAGE}"
+
+                  echo "Commit: ${GIT_COMMIT}"
+
+                  echo ""
+
+
+                  cd "${PRESIDIO_DIR}"
+
+
+                  az acr build \
+                    --registry "${ACR}" \
+                    --image "${REPO}:${TAG}" \
+                    --build-arg BUILD_DATE="${BUILD_DATE}" \
+                    --build-arg VCS_REF="${GIT_COMMIT}" \
+                    --build-arg VERSION="${TAG}" \
+                    --file Dockerfile \
+                    --platform linux/amd64 \
+                    . || {
+                      echo "ACR build failed, trying local build..."
+                      az acr login --name "${ACR}"
+                      docker build -t "${IMAGE}" -f Dockerfile .
+                      docker push "${IMAGE}"
+                    }
+
+                  echo ""
+
+                  echo "✓ Build completed"
+
+                  echo "##vso[task.setvariable variable=image;isOutput=true]${IMAGE}"
+    
+    - stage: Scan_Watchtower
+      displayName: " Scan Watchtower"
+      dependsOn: Build_Watchtower
+      condition: |
+        and(
+          succeeded(),
+          eq(variables['EnableTrivy'], 'true')
+        )
+      variables:
+        image: $[ stageDependencies.Build_Watchtower.Build.outputs['BuildPush.image'] ]
+      jobs:
+        - job: Trivy
+          displayName: Trivy Scan
+          steps:
+            - checkout: none
+            - bash: >
+                set -euo pipefail
+
+
+                echo "Installing Trivy..."
+
+                wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+
+                echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+
+                sudo apt-get update
+
+                sudo apt-get install -y trivy
+              displayName: Install Trivy
+            - task: AzureCLI@2
+              displayName: Scan Image
+              inputs:
+                azureSubscription: $(azureSubscription)
+                scriptType: bash
+                scriptLocation: inlineScript
+                inlineScript: |
+                  set -euo pipefail
+
+                  az acr login --name "$(watchtower.registryName)"
+
+                  echo "======================================"
+                  echo "Scanning Watchtower Image"
+                  echo "======================================"
+                  echo "Image: $(image)"
+                  echo ""
+
+                  # Ensure reports directory exists
+                  mkdir -p reports
+
+                  # Run Trivy scan
+                  trivy image \
+                    --severity CRITICAL,HIGH \
+                    --format sarif \
+                    --output reports/trivy.sarif \
+                    "$(image)" || true
+
+                  trivy image \
+                    --severity CRITICAL,HIGH,MEDIUM \
+                    --format table \
+                    "$(image)" || true
+
+                  # Ensure file exists
+                  if [ ! -f reports/trivy.sarif ]; then
+                    echo '{"version":"2.1.0","runs":[]}' > reports/trivy.sarif
+                  fi
+
+                  echo ""
+                  echo "✓ Scan completed (informational)"
+              continueOnError: true
+            - task: PublishPipelineArtifact@1
+              condition: always()
+              inputs:
+                targetPath: $(System.DefaultWorkingDirectory)/reports/trivy.sarif
+                artifactName: trivy-watchtower
+              displayName: Publish Trivy Report
+    
+    - stage: Scan_Presidio
+      displayName: " Scan Presidio"
+      dependsOn: Build_Presidio
+      condition: |
+        and(
+          succeeded(),
+          eq(variables['EnableTrivy'], 'true')
+        )
+      variables:
+        image: $[ stageDependencies.Build_Presidio.Build.outputs['BuildPush.image'] ]
+      jobs:
+        - job: Trivy
+          displayName: Trivy Scan
+          steps:
+            - checkout: none
+            - bash: >
+                set -euo pipefail
+
+
+                echo "Installing Trivy..."
+
+                wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+
+                echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+
+                sudo apt-get update
+
+                sudo apt-get install -y trivy
+              displayName: Install Trivy
+            - task: AzureCLI@2
+              displayName: Scan Image
+              inputs:
+                azureSubscription: $(azureSubscription)
+                scriptType: bash
+                scriptLocation: inlineScript
+                inlineScript: |
+                  set -euo pipefail
+
+                  az acr login --name "$(presidio.registryName)"
+
+                  echo "======================================"
+                  echo "Scanning Presidio Image"
+                  echo "======================================"
+                  echo "Image: $(image)"
+                  echo ""
+
+                  # Ensure reports directory exists
+                  mkdir -p reports
+
+                  # Run Trivy scan
+                  trivy image \
+                    --severity CRITICAL,HIGH \
+                    --format sarif \
+                    --output reports/trivy.sarif \
+                    "$(image)" || true
+
+                  trivy image \
+                    --severity CRITICAL,HIGH,MEDIUM \
+                    --format table \
+                    "$(image)" || true
+
+                  # Ensure file exists
+                  if [ ! -f reports/trivy.sarif ]; then
+                    echo '{"version":"2.1.0","runs":[]}' > reports/trivy.sarif
+                  fi
+
+                  echo ""
+                  echo "✓ Scan completed (informational)"
+              continueOnError: true
+            - task: PublishPipelineArtifact@1
+              condition: always()
+              inputs:
+                targetPath: $(System.DefaultWorkingDirectory)/reports/trivy.sarif
+                artifactName: trivy-presidio
+              displayName: Publish Trivy Report
+    - stage: APIM_Test
+      displayName: APIM Automation Test
+      dependsOn:
+        - Build_Watchtower
+      condition: succeeded()
+
+      jobs:
+        - job: Import_APIM
+          steps:
+          - checkout: self
+          - task: DownloadPipelineArtifact@2
+            inputs:
+              artifactName: openapi-files
+              targetPath: $(Pipeline.Workspace)/openapi
+          - bash: |
+              echo "Download OpenAPI files:"
+              find $(Pipeline.Workspace)/openapi -type f
+
+              echo ""
+              ls -R $(Pipeline.Workspace)/openapi
+            displayName: Verify OpenAPI Artifact
+
+          - bash: |
+              echo "===OpenAPI Title ==="
+              grep -A5 -B2 '"title"' $(Pipeline.Workspace)/openapi/openapi.json || true
+              echo ""
+              echo "openAPI Info"
+              cat $(Pipeline.Workspace)/openapi/openapi.json | jq '.info'
+            displayName: Inspect OpenAPI 
+          - task: AzureCLI@2
+            displayName: List Existing APIs
+            inputs:
+              azureSubscription: $(azureSubscription)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az apim api list \
+                  --resource-group "$(apimResourceGroup)" \
+                  --service-name "$(apimServiceName)" \
+                  -o table
+          - task: AzureCLI@2
+            displayName: Show Current API
+            inputs:
+              azureSubscription: $(azureSubscription)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az apim api show \
+                   --resource-group "$(apimResourceGroup)" \
+                   --service-name "$(apimServiceName)" \
+                   --api-id "$(apimApiId)"
+
+          - task: AzureCLI@2
+            displayName: Import OpenAPI
+            inputs:
+              azureSubscription: $(azureSubscription)
+              scriptType: bash
+              scriptLocation: inlineScript
+
+              inlineScript: |
+
+                set -e
+
+                az apim api import \
+                  --resource-group "$(apimResourceGroup)" \
+                  --service-name "$(apimServiceName)" \
+                  --api-id "$(apimApiId)" \
+                  --path "$(apimApiPath)" \
+                  --display-name "$(apimApiId)" \
+                  --specification-format OpenApiJson \
+                  --specification-path "$(Pipeline.Workspace)/openapi/openapi.json"
+          - bash: |
+              set -euo pipefail
+
+              SCRIPT_FILE="$(Build.SourcesDirectory)/scripts/apply-apim-operation-policies.sh"
+
+              if [ ! -f "${SCRIPT_FILE}" ]; then
+                echo "##vso[task.logissue type=error]Script not found: ${SCRIPT_FILE}"
+                exit 1
+              fi
+
+              echo "Script before conversion:"
+              file "${SCRIPT_FILE}"
+
+              echo "Converting CRLF line endings to LF..."
+              sed -i 's/\r$//' "${SCRIPT_FILE}"
+
+              echo "Script after conversion:"
+              file "${SCRIPT_FILE}"
+
+              echo "Validating Bash syntax..."
+              bash -n "${SCRIPT_FILE}"
+
+              chmod +x "${SCRIPT_FILE}"
+
+              echo "APIM policy script uses LF and has valid Bash syntax."
+            displayName: Normalize and Validate APIM Policy Script
+          - task: AzureCLI@2
+            displayName: Apply and Verify Method-Specific Policies
+            inputs:
+              azureSubscription: $(azureSubscription)
+              scriptType: bash
+              scriptLocation: scriptPath
+              scriptPath: $(Build.SourcesDirectory)/scripts/apply-apim-operation-policies.sh
+              workingDirectory: $(Build.SourcesDirectory)
+            env:
+              APIM_RESOURCE_GROUP: $(apimResourceGroup)
+              APIM_SERVICE_NAME: $(apimServiceName)
+              APIM_API_ID: $(apimApiId)
+              APIM_POLICY_FILE: $(Build.SourcesDirectory)/infra/global-policy.xml 
+                    
+          - task: AzureCLI@2
+            displayName: Verify Imported API
+            inputs:
+              azureSubscription: $(azureSubscription)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+
+                az apim api show \
+                  --resource-group "$(apimResourceGroup)" \
+                  --service-name "$(apimServiceName)" \
+                  --api-id "$(apimApiId)" \
+                  --query "{Name:name,Path:path,DisplayName:displayName}" \
+                  -o table
+
+    - stage: Deploy_Watchtower
+      displayName: Deploy Watchtower
+      dependsOn:
+        - Security
+        - Build_Watchtower
+        - Scan_Watchtower
+      condition: false
+      variables:
+        image: $[ stageDependencies.Build_Watchtower.Build.outputs['BuildPush.image'] ]
+      jobs:
+        - job: Deploy
+          displayName: Deploy to App Service
+          steps:
+            - checkout: none
+            - task: AzureCLI@2
+              name: Backup
+              displayName: Backup Config
+              inputs:
+                azureSubscription: $(azureSubscription)
+                scriptType: bash
+                scriptLocation: inlineScript
+                inlineScript: >
+                  set -euo pipefail
+
+
+                  CURRENT=$(az webapp config container show \
+                    --name "$(watchtower.appName)" \
+                    --resource-group "$(watchtower.rgName)" \
+                    --query "[0].value" -o tsv 2>/dev/null || echo "none")
+
+                  echo "Previous image: ${CURRENT}"
+
+                  echo "##vso[task.setvariable variable=previous;isOutput=true]${CURRENT}"
+            - task: AzureWebAppContainer@1
+              displayName: Deploy Container
+              inputs:
+                azureSubscription: $(azureSubscription)
+                appName: $(watchtower.appName)
+                resourceGroupName: $(watchtower.rgName)
+                imageName: $(image)
+            # - task: AzureCLI@2
+            #   displayName: Health Check
+            #   inputs:
+            #     azureSubscription: $(azureSubscription)
+            #     scriptType: bash
+            #     scriptLocation: inlineScript
+            #     inlineScript: >
+            #       set -euo pipefail
+
+
+            #       URL="$(watchtower.appUrl)$(watchtower.smokeTestPath)"
+
+
+            #       echo "======================================"
+
+            #       echo "Health Check"
+
+            #       echo "======================================"
+
+            #       echo "URL: ${URL}"
+
+            #       echo ""
+
+
+            #       echo "Waiting for deployment..."
+
+            #       sleep 30
+
+
+            #       for i in {1..20}; do
+            #         CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 15 "${URL}" || echo "000")
+                    
+            #         if [ "${CODE}" = "200" ]; then
+            #           echo ""
+            #           echo "✓ Watchtower is healthy (attempt $i)"
+            #           curl -s "${URL}" | jq '.' 2>/dev/null || curl -s "${URL}"
+            #           exit 0
+            #         fi
+                    
+            #         echo "Attempt $i/20: Status ${CODE}"
+            #         sleep 10
+            #       done
+
+
+            #       echo ""
+
+            #       echo "✗ Health check failed after 20 attempts"
+
+            #       exit 1
+    
+    - stage: Deploy_Presidio
+      displayName: Deploy Presidio
+      dependsOn:
+        - Security
+        - Build_Presidio
+        - Scan_Presidio
+      condition: false
+      variables:
+        image: $[ stageDependencies.Build_Presidio.Build.outputs['BuildPush.image'] ]
+      jobs:
+        - job: Deploy
+          displayName: Deploy to App Service
+          steps:
+            - checkout: none
+            - task: AzureCLI@2
+              name: Backup
+              displayName: Backup Config
+              inputs:
+                azureSubscription: $(azureSubscription)
+                scriptType: bash
+                scriptLocation: inlineScript
+                inlineScript: >
+                  set -euo pipefail
+
+
+                  CURRENT=$(az webapp config container show \
+                    --name "$(presidio.appName)" \
+                    --resource-group "$(presidio.rgName)" \
+                    --query "[0].value" -o tsv 2>/dev/null || echo "none")
+
+                  echo "Previous image: ${CURRENT}"
+
+                  echo "##vso[task.setvariable variable=previous;isOutput=true]${CURRENT}"
+            - task: AzureWebAppContainer@1
+              displayName: Deploy Container
+              inputs:
+                azureSubscription: $(azureSubscription)
+                appName: $(presidio.appName)
+                resourceGroupName: $(presidio.rgName)
+                imageName: $(image)
+            - task: AzureCLI@2
+              displayName: Health Check
+              inputs:
+                azureSubscription: $(azureSubscription)
+                scriptType: bash
+                scriptLocation: inlineScript
+                inlineScript: >
+                  set -euo pipefail
+
+
+                  URL="https://$(presidio.appName).azurewebsites.net$(presidio.smokeTestPath)"
+
+
+                  echo "======================================"
+
+                  echo "Health Check: ${URL}"
+
+                  echo "======================================"
+
+
+                  echo "Waiting for ML models to load (this may take a while)..."
+
+                  sleep 60
+
+
+                  for i in {1..40}; do
+                    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 15 "${URL}" || echo "000")
+                    
+                    if [ "${CODE}" = "200" ]; then
+                      echo ""
+                      echo "✓ Presidio is healthy (attempt $i)"
+                      curl -s "${URL}" | jq '.' 2>/dev/null || curl -s "${URL}"
+                      exit 0
+                    fi
+                    
+                    echo "Attempt $i/40: Status ${CODE}"
+                    sleep 15
+                  done
+
+
+                  echo ""
+
+                  echo "✗ Health check failed"
+
+                  exit 1
+    
+    - stage: Summary
+      displayName: Summary
+      dependsOn:
+        - DetectChanges
+        - Deploy_Watchtower
+        - Deploy_Presidio
+      condition: always()
+      jobs:
+        - job: Report
+          displayName: Deployment Report
+          steps:
+            - checkout: none
+            - bash: |
+                echo "=============================================="
+                echo "     DEVELOPMENT DEPLOYMENT COMPLETE"
+                echo "=============================================="
+                echo ""
+                echo "Build ID:     $(Build.BuildId)"
+                echo "Commit:       $(Build.SourceVersion)"
+                echo "Triggered by: $(Build.RequestedFor)"
+                echo "Reason:       $(Build.Reason)"
+                echo ""
+                echo "=============================================="
+                echo "Services:"
+                echo "=============================================="
+                echo "Watchtower: https://$(watchtower.appName).azurewebsites.net"
+                echo "Presidio:   https://$(presidio.appName).azurewebsites.net"
+                echo ""
+                echo "=============================================="
+                echo "All quality checks were informational only"
+                echo "=============================================="
+              displayName: Show Summary
+
+
+  # # ============================================================================
+  # # MULTI-SERVICE AZURE DEVOPS CI/CD PIPELINE
+  # # SOC Watchtower Backend + Presidio Security Service
+  # # ============================================================================
+
+  # trigger:
+  #   branches:
+  #     include:
+  #       - development
+
+  #   paths:
+  #     include:
+  #       - src/**
+  #       - Dockerfile
+  #       - package*.json
+
+  # pr:
+  #   branches:
+  #     include:
+  #       - development
+
+  # pool:
+  #   vmImage: 'ubuntu-latest'
+
+  # # ============================================================================
+  # # GLOBAL VARIABLES
+  # # ============================================================================
+  # variables:
+  #   # ========== Azure Connection ==========
+  #   azureSubscription: 'AzureServiceConnection'
+    
+  #   # ========== Common Configuration ==========
+  #   nodeVersion: '22.x'
+  #   vmImageName: 'ubuntu-latest'
+    
+  #   # ========== Security Tooling ==========
+  #   gitleaksVersion: 'v8.18.3'
+  #   npmAuditFailLevel: 'high'
+    
+  #   # ========== Feature Flags ==========
+  #   EnableScans: 'true'
+  #   EnableUnitTests: 'true'
+  #   EnableMSDO: 'true'
+  #   EnableGitLeaks: 'false'
+  #   EnableNpmAudit: 'true'
+  #   EnableLint: 'true'
+  #   EnableSourceSBOM: 'true'
+  #   EnableTrivy: 'true'
+  #   EnableImageSBOM: 'true'
+  #   EnableDeploy: 'true'
+  #   EnableSmokeTests: 'false'
+    
+  #   # ========== Watchtower Backend Configuration ==========
+  #   watchtower.rgName: 'soc-watchtower-dev'
+  #   watchtower.appName: 'soc-watchtower-backend-dev'
+  #   watchtower.registryName: 'acrsocwatchtowerbackenddev'
+  #   watchtower.containerRepository: 'soc-watchtower-backend'
+  #   watchtower.dockerfilePath: 'Dockerfile'
+  #   watchtower.appPort: '5000'
+  #   watchtower.smokeTestPath: '/health'
+    
+  #   # ========== Presidio Security Service Configuration ==========
+  #   presidio.rgName: 'soc-watchtower-dev'
+  #   presidio.appName: 'presidio-webapi'
+  #   presidio.registryName: 'socsecurity'
+  #   presidio.containerRepository: 'presidioapp'
+  #   presidio.dockerfilePath: 'src/services/security/presidio/Dockerfile'
+  #   presidio.appPort: '86'
+  #   presidio.smokeTestPath: '/health'
+
+  # # ============================================================================
+  # # STAGE 0: Path Detection & Service Selection
+  # # ============================================================================
+  # stages:
+  # - stage: DetectChanges
+  #   displayName: 'Detect Changed Services'
+  #   jobs:
+  #   - job: PathAnalysis
+  #     displayName: 'Analyze Changed Paths'
+  #     steps:
+  #     - checkout: self
+  #       fetchDepth: 0
+        
+  #     - bash: |
+  #         set -euo pipefail
+          
+  #         echo "======================================"
+  #         echo "    PATH CHANGE DETECTION"
+  #         echo "======================================"
+  #         echo ""
+          
+  #         # Get changed files between current commit and previous
+  #         if [ "$(Build.Reason)" == "PullRequest" ]; then
+  #           echo "PR Build - comparing against target branch"
+  #           BASE_COMMIT="origin/$(System.PullRequest.TargetBranch)"
+  #           git fetch origin $(System.PullRequest.TargetBranch) || true
+  #         else
+  #           echo "CI Build - comparing against previous commit"
+  #           BASE_COMMIT="HEAD~1"
+  #         fi
+          
+  #         echo "Base commit: ${BASE_COMMIT}"
+  #         echo "Current commit: $(Build.SourceVersion)"
+  #         echo ""
+          
+  #         # Get list of changed files
+  #         CHANGED_FILES=$(git diff --name-only ${BASE_COMMIT} HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          
+  #         if [ -z "$CHANGED_FILES" ]; then
+  #           echo "⚠ No changed files detected, will build all services"
+  #           echo "##vso[task.setvariable variable=deployWatchtower;isOutput=true]true"
+  #           echo "##vso[task.setvariable variable=deployPresidio;isOutput=true]true"
+  #           exit 0
+  #         fi
+          
+  #         echo "Changed files:"
+  #         echo "$CHANGED_FILES"
+  #         echo ""
+          
+  #         # Initialize flags
+  #         DEPLOY_WATCHTOWER=false
+  #         DEPLOY_PRESIDIO=false
+          
+  #         # Check for Watchtower changes (root and non-security services)
+  #         echo "=== Checking Watchtower Backend paths ==="
+          
+  #         while IFS= read -r file; do
+  #           # Watchtower patterns
+  #           if [[ "$file" =~ ^src/controllers/ ]] || \
+  #              [[ "$file" =~ ^src/models/ ]] || \
+  #              [[ "$file" =~ ^src/routes/ ]] || \
+  #              [[ "$file" =~ ^src/utils/ ]] || \
+  #              [[ "$file" =~ ^src/middleware/ ]] || \
+  #              [[ "$file" =~ ^src/config/ ]] || \
+  #              ( [[ "$file" =~ ^src/services/ ]] && [[ ! "$file" =~ ^src/services/security/ ]] ) || \
+  #              [[ "$file" == "src/app.js" ]] || \
+  #              [[ "$file" == "package.json" ]] || \
+  #              [[ "$file" == "package-lock.json" ]] || \
+  #              [[ "$file" == "Dockerfile" ]] || \
+  #              [[ "$file" == "tsconfig.json" ]] || \
+  #              [[ "$file" =~ ^\..* ]]; then
+  #             echo "✓ Watchtower match: $file"
+  #             DEPLOY_WATCHTOWER=true
+  #           fi
+            
+  #           # Presidio patterns
+  #           if [[ "$file" =~ ^src/services/security/ ]]; then
+  #             echo "✓ Presidio match: $file"
+  #             DEPLOY_PRESIDIO=true
+  #           fi
+  #         done <<< "$CHANGED_FILES"
+          
+  #         # Summary
+  #         echo ""
+  #         echo "======================================"
+  #         echo "    DEPLOYMENT DECISION"
+  #         echo "======================================"
+  #         echo "Deploy Watchtower Backend: ${DEPLOY_WATCHTOWER}"
+  #         echo "Deploy Presidio Security: ${DEPLOY_PRESIDIO}"
+  #         echo "======================================"
+          
+  #         # Export variables for downstream stages
+  #         echo "##vso[task.setvariable variable=deployWatchtower;isOutput=true]${DEPLOY_WATCHTOWER}"
+  #         echo "##vso[task.setvariable variable=deployPresidio;isOutput=true]${DEPLOY_PRESIDIO}"
+          
+  #       name: DetectPaths
+  #       displayName: 'Detect Changed Paths'
+
+  # # ============================================================================
+  # # STAGE 1: Source Code Security & Quality (Shared)
+  # # ============================================================================
+  # - stage: SourceAnalysis
+  #   displayName: 'Source Code Analysis (Shared)'
+  #   dependsOn: DetectChanges
+  #   condition: |
+  #     and(
+  #       succeeded(),
+  #       eq(variables['EnableScans'], 'true'),
+  #       or(
+  #         eq(dependencies.DetectChanges.outputs['PathAnalysis.DetectPaths.deployWatchtower'], 'true'),
+  #         eq(dependencies.DetectChanges.outputs['PathAnalysis.DetectPaths.deployPresidio'], 'true')
+  #       )
+  #     )
+  #   jobs:
+    
+  #   # ---------- Job: GitLeaks Secret Scanning ----------
+  #   - job: GitLeaksScanning
+  #     displayName: 'Secret Scanning with GitLeaks'
+  #     condition: eq(variables['EnableGitLeaks'], 'true')
+  #     steps:
+  #     - checkout: self
+  #       fetchDepth: 0
+        
+  #     - bash: |
+  #         set -euo pipefail
+  #         echo "Installing GitLeaks $(gitleaksVersion)..."
+  #         GITLEAKS_VERSION=$(echo "$(gitleaksVersion)" | sed 's/^v//')
+  #         wget -q "https://github.com/gitleaks/gitleaks/releases/download/$(gitleaksVersion)/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+  #         tar -xzf "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+  #         chmod +x gitleaks
+  #         sudo mv gitleaks /usr/local/bin/
+  #         gitleaks version
+  #       displayName: 'Install GitLeaks'
+        
+  #     - bash: |
+  #         set -euo pipefail
+  #         echo "Scanning repository for secrets..."
+  #         gitleaks detect \
+  #           --source="$(Build.SourcesDirectory)" \
+  #           --report-path="gitleaks-report.json" \
+  #           --report-format=json \
+  #           --verbose \
+  #           --no-git || GITLEAKS_EXIT=$?
+          
+  #         if [ -f "gitleaks-report.json" ]; then
+  #           LEAK_COUNT=$(jq length "gitleaks-report.json" 2>/dev/null || echo "0")
+  #           echo "Total secrets found: ${LEAK_COUNT}"
+            
+  #           if [ "${LEAK_COUNT}" != "0" ]; then
+  #             echo "##vso[task.logissue type=error]GitLeaks found ${LEAK_COUNT} potential secret(s)"
+  #             jq '.' gitleaks-report.json || cat gitleaks-report.json
+  #             exit 1
+  #           fi
+  #         fi
+          
+  #         exit ${GITLEAKS_EXIT:-0}
+  #       displayName: 'Run GitLeaks Secret Scan'
+        
+  #     - task: PublishBuildArtifacts@1
+  #       condition: always()
+  #       inputs:
+  #         PathtoPublish: 'gitleaks-report.json'
+  #         ArtifactName: 'gitleaks-report'
+  #       displayName: 'Publish GitLeaks Report'
+
+  #   # ---------- Job: NPM Audit ----------
+  #   - job: DependencyAudit
+  #     displayName: 'NPM Dependency Audit'
+  #     condition: eq(variables['EnableNpmAudit'], 'true')
+  #     steps:
+  #     - checkout: self
+        
+  #     - task: NodeTool@0
+  #       inputs:
+  #         versionSpec: '$(nodeVersion)'
+  #       displayName: 'Install Node.js'
+        
+  #     - bash: |
+  #         set -euo pipefail
+  #         echo "Running npm audit..."
+  #         npm audit --json > npm-audit-report.json || true
+          
+  #         if [ -f npm-audit-report.json ]; then
+  #           CRITICAL=$(jq '.metadata.vulnerabilities.critical // 0' npm-audit-report.json)
+  #           HIGH=$(jq '.metadata.vulnerabilities.high // 0' npm-audit-report.json)
+  #           MODERATE=$(jq '.metadata.vulnerabilities.moderate // 0' npm-audit-report.json)
+            
+  #           echo "Vulnerability Summary:"
+  #           echo "  Critical: $CRITICAL"
+  #           echo "  High: $HIGH"
+  #           echo "  Moderate: $MODERATE"
+            
+  #           if [ "$(npmAuditFailLevel)" = "critical" ] && [ "$CRITICAL" -gt 0 ]; then
+  #             echo "##vso[task.logissue type=error]Found $CRITICAL critical vulnerabilities"
+  #             exit 1
+  #           elif [ "$(npmAuditFailLevel)" = "high" ] && [ "$((CRITICAL + HIGH))" -gt 0 ]; then
+  #             echo "##vso[task.logissue type=error]Found $((CRITICAL + HIGH)) high+ vulnerabilities"
+  #             exit 1
+  #           fi
+  #         fi
+  #       displayName: 'Run NPM Audit'
+        
+  #     - task: PublishBuildArtifacts@1
+  #       condition: always()
+  #       inputs:
+  #         PathtoPublish: 'npm-audit-report.json'
+  #         ArtifactName: 'npm-audit-report'
+
+  #   # ---------- Job: MSDO ----------
+  #   - job: MSDO
+  #     displayName: 'Microsoft Security DevOps'
+  #     condition: eq(variables['EnableMSDO'], 'true')
+  #     steps:
+  #     - checkout: self
+        
+  #     - task: MicrosoftSecurityDevOps@1
+  #       displayName: 'Run Microsoft Security DevOps'
+  #       continueOnError: true
+
+  # # ============================================================================
+  # # STAGE 2: Build & Push - Watchtower Backend
+  # # ============================================================================
+  # - stage: Build_Watchtower
+  #   displayName: 'Build Watchtower Backend'
+  #   dependsOn: 
+  #     - DetectChanges
+  #     - SourceAnalysis
+  #   condition: |
+  #     and(
+  #       in(dependencies.SourceAnalysis.result, 'Succeeded', 'SucceededWithIssues', 'Skipped'),
+  #       eq(dependencies.DetectChanges.outputs['PathAnalysis.DetectPaths.deployWatchtower'], 'true')
+  #     )
+  #   jobs:
+  #   - job: BuildWatchtower
+  #     displayName: 'Build & Push Watchtower Image'
+  #     steps:
+  #     - checkout: self
+  #       fetchDepth: 0
+        
+  #     - task: NodeTool@0
+  #       displayName: 'Install Node.js'
+  #       inputs:
+  #         versionSpec: '$(nodeVersion)'
+          
+  #     - bash: |
+  #         set -euo pipefail
+  #         echo "Regenerating package-lock.json..."
+  #         rm -rf node_modules package-lock.json
+  #         npm install --package-lock-only
+  #       displayName: 'Regenerate Package Lock'
+      
+  #     - task: AzureCLI@2
+  #       name: BuildPushWatchtower
+  #       displayName: 'Build & Push Watchtower Image'
+  #       inputs:
+  #         azureSubscription: '$(azureSubscription)'
+  #         scriptType: bash
+  #         scriptLocation: inlineScript
+  #         inlineScript: |
+  #           set -euo pipefail
+            
+  #           # Configuration
+  #           ACR="$(watchtower.registryName)"
+  #           REPO="$(watchtower.containerRepository)"
+  #           TAG="$(Build.BuildId)"
+  #           LOGIN_SERVER="${ACR}.azurecr.io"
+  #           IMAGE="${LOGIN_SERVER}/${REPO}:${TAG}"
+            
+  #           BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+  #           GIT_COMMIT=$(git rev-parse --short HEAD)
+            
+  #           echo "=== Watchtower Backend Build ==="
+  #           echo "ACR: ${ACR}"
+  #           echo "Image: ${IMAGE}"
+  #           echo "Git Commit: ${GIT_COMMIT}"
+  #           echo ""
+            
+  #           # Verify ACR
+  #           echo "Verifying ACR..."
+  #           az acr show -n "${ACR}" -o table
+            
+  #           # Login
+  #           echo "Logging into ACR..."
+  #           az acr login --name "${ACR}"
+            
+  #           # Build
+  #           echo "Building image..."
+  #           docker build \
+  #             --pull \
+  #             --build-arg BUILD_DATE="${BUILD_DATE}" \
+  #             --build-arg VCS_REF="${GIT_COMMIT}" \
+  #             --build-arg VERSION="${TAG}" \
+  #             --label "org.opencontainers.image.created=${BUILD_DATE}" \
+  #             --label "org.opencontainers.image.revision=${GIT_COMMIT}" \
+  #             --label "org.opencontainers.image.version=${TAG}" \
+  #             --label "service=watchtower-backend" \
+  #             -t "${IMAGE}" \
+  #             -f "$(Build.SourcesDirectory)/$(watchtower.dockerfilePath)" \
+  #             "$(Build.SourcesDirectory)"
+            
+  #           # Tag
+  #           echo "Tagging image..."
+  #           docker tag "${IMAGE}" "${LOGIN_SERVER}/${REPO}:latest"
+  #           docker tag "${IMAGE}" "${LOGIN_SERVER}/${REPO}:${GIT_COMMIT}"
+            
+  #           # Push with retry
+  #           retry_push() {
+  #             local image=$1
+  #             local max_attempts=5
+  #             local attempt=1
+              
+  #             while [ $attempt -le $max_attempts ]; do
+  #               echo "Push attempt $attempt/$max_attempts for $image"
+  #               if docker push "$image"; then
+  #                 echo "✓ Successfully pushed"
+  #                 return 0
+  #               fi
+  #               if [ $attempt -lt $max_attempts ]; then
+  #                 echo "Push failed, retrying..."
+  #                 sleep $((attempt * 5))
+  #               fi
+  #               attempt=$((attempt + 1))
+  #             done
+  #             echo "✗ Push failed after $max_attempts attempts"
+  #             return 1
+  #           }
+            
+  #           echo "Pushing images..."
+  #           retry_push "${IMAGE}"
+  #           retry_push "${LOGIN_SERVER}/${REPO}:latest"
+  #           retry_push "${LOGIN_SERVER}/${REPO}:${GIT_COMMIT}"
+            
+  #           # Verify
+  #           echo "Verifying push..."
+  #           az acr repository show-tags \
+  #             --name "${ACR}" \
+  #             --repository "${REPO}" \
+  #             --top 5 \
+  #             --orderby time_desc \
+  #             -o table
+            
+  #           # Get digest
+  #           DIGEST=$(az acr repository show --name "${ACR}" --image "${REPO}:${TAG}" --query digest -o tsv)
+            
+  #           # Export variables
+  #           echo "##vso[task.setvariable variable=watchtowerImage;isOutput=true]${IMAGE}"
+  #           echo "##vso[task.setvariable variable=watchtowerDigest;isOutput=true]${DIGEST}"
+  #           echo "##vso[task.setvariable variable=watchtowerLoginServer;isOutput=true]${LOGIN_SERVER}"
+            
+  #           echo "✓ Watchtower build completed successfully"
+
+  # # ============================================================================
+  # # STAGE 3: Build & Push - Presidio Security Service
+  # # ============================================================================
+  # - stage: Build_Presidio
+  #   displayName: 'Build Presidio Security Service'
+  #   dependsOn: 
+  #     - DetectChanges
+  #
+  #     - SourceAnalysis
+  #   condition: |
+  #     and(
+  #       in(dependencies.SourceAnalysis.result, 'Succeeded', 'SucceededWithIssues', 'Skipped'),
+  #       eq(dependencies.DetectChanges.outputs['PathAnalysis.DetectPaths.deployPresidio'], 'true')
+  #     )
+  #   jobs:
+  #   - job: BuildPresidio
+  #     displayName: 'Build & Push Presidio Image'
+  #     steps:
+  #     - checkout: self
+  #       fetchDepth: 0
+      
+  #     - bash: |
+  #         set -euo pipefail
+          
+  #         echo "======================================"
+  #         echo "   PRESIDIO FILES VERIFICATION"
+  #         echo "======================================"
+          
+  #         PRESIDIO_DIR="$(Build.SourcesDirectory)/src/services/security/presidio"
+          
+  #         echo "Directory: ${PRESIDIO_DIR}"
+  #         echo ""
+          
+  #         if [ ! -d "${PRESIDIO_DIR}" ]; then
+  #           echo "✗ ERROR: Presidio directory not found!"
+  #           exit 1
+  #         fi
+          
+  #         echo "Files in directory:"
+  #         ls -la "${PRESIDIO_DIR}"
+  #         echo ""
+          
+  #         echo "Checking required files:"
+  #         REQUIRED_FILES=("Dockerfile" "requirements.txt" "presidio_runner.py" "bart_runner.py" "llm_runner.py" "api.py" "startup.py")
+          
+  #         for file in "${REQUIRED_FILES[@]}"; do
+  #           if [ -f "${PRESIDIO_DIR}/${file}" ]; then
+  #             echo "✓ ${file}"
+  #           else
+  #             echo "✗ ${file} MISSING"
+  #             exit 1
+  #           fi
+  #         done
+          
+  #         echo ""
+  #         echo "✓ All required files present"
+  #         echo "======================================"
+  #       displayName: 'Verify Files Exist'
+      
+  #     - task: AzureCLI@2
+  #       name: BuildPushPresidio
+  #       displayName: 'Build & Push Presidio Image'
+  #       inputs:
+  #         azureSubscription: '$(azureSubscription)'
+  #         scriptType: bash
+  #         scriptLocation: inlineScript
+  #         inlineScript: |
+  #           set -euo pipefail
+            
+  #           ACR="$(presidio.registryName)"
+  #           REPO="$(presidio.containerRepository)"
+  #           TAG="$(Build.BuildId)"
+  #           LOGIN_SERVER="${ACR}.azurecr.io"
+  #           IMAGE="${LOGIN_SERVER}/${REPO}:${TAG}"
+            
+  #           BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+  #           GIT_COMMIT=$(git rev-parse --short HEAD)
+            
+  #           PRESIDIO_DIR="$(Build.SourcesDirectory)/src/services/security/presidio"
+            
+  #           echo "======================================"
+  #           echo "   PRESIDIO BUILD"
+  #           echo "======================================"
+  #           echo "ACR: ${ACR}"
+  #           echo "Image: ${IMAGE}"
+  #           echo ""
+            
+  #           # Verify ACR
+  #           az acr show -n "${ACR}" -o table
+            
+  #           # Change to presidio directory
+  #           cd "${PRESIDIO_DIR}"
+            
+  #           echo "Files in build context:"
+  #           ls -la
+  #           echo ""
+            
+  #           # Try ACR build first
+  #           echo "=== Attempting ACR Build ==="
+  #           az acr build \
+  #             --registry "${ACR}" \
+  #             --image "${REPO}:${TAG}" \
+  #             --build-arg BUILD_DATE="${BUILD_DATE}" \
+  #             --build-arg VCS_REF="${GIT_COMMIT}" \
+  #             --build-arg VERSION="${TAG}" \
+  #             --file Dockerfile \
+  #             --platform linux/amd64 \
+  #             . 2>&1 || ACR_BUILD_FAILED=$?
+            
+  #           if [ "${ACR_BUILD_FAILED:-0}" -ne 0 ]; then
+  #             echo ""
+  #             echo "⚠ ACR Build failed, checking logs..."
+              
+  #             # Get the run ID from ACR
+  #             RUN_ID=$(az acr task list-runs \
+  #               --registry "${ACR}" \
+  #               --top 1 \
+  #               --query "[0].runId" -o tsv 2>/dev/null || echo "")
+              
+  #             if [ -n "$RUN_ID" ]; then
+  #               echo ""
+  #               echo "=== ACR Build Logs (Run ID: ${RUN_ID}) ==="
+  #               az acr task logs --registry "${ACR}" --run-id "${RUN_ID}" || true
+  #             fi
+              
+  #             echo ""
+  #             echo "=== Falling back to local Docker build ==="
+              
+  #             # Login to ACR
+  #             az acr login --name "${ACR}"
+              
+  #             # Disable BuildKit
+  #             export DOCKER_BUILDKIT=0
+              
+  #             # Build locally
+  #             echo "Building image locally..."
+  #             docker build \
+  #               --no-cache \
+  #               --build-arg BUILD_DATE="${BUILD_DATE}" \
+  #               --build-arg VCS_REF="${GIT_COMMIT}" \
+  #               --build-arg VERSION="${TAG}" \
+  #               -t "${IMAGE}" \
+  #               -f Dockerfile \
+  #               .
+              
+  #             echo "Tagging image..."
+  #             docker tag "${IMAGE}" "${LOGIN_SERVER}/${REPO}:latest"
+  #             docker tag "${IMAGE}" "${LOGIN_SERVER}/${REPO}:${GIT_COMMIT}"
+              
+  #             echo "Pushing image..."
+  #             docker push "${IMAGE}"
+  #             docker push "${LOGIN_SERVER}/${REPO}:latest"
+  #             docker push "${LOGIN_SERVER}/${REPO}:${GIT_COMMIT}"
+              
+  #           else
+  #             echo ""
+  #             echo "✓ ACR Build succeeded"
+              
+  #             # Tag additional versions
+  #             echo ""
+  #             echo "=== Tagging Additional Versions ==="
+  #             az acr import \
+  #               --name "${ACR}" \
+  #               --source "${LOGIN_SERVER}/${REPO}:${TAG}" \
+  #               --image "${REPO}:latest" \
+  #               --force || echo "⚠ Could not tag as latest"
+              
+  #             az acr import \
+  #               --name "${ACR}" \
+  #               --source "${LOGIN_SERVER}/${REPO}:${TAG}" \
+  #               --image "${REPO}:${GIT_COMMIT}" \
+  #               --force || echo "⚠ Could not tag with commit hash"
+  #           fi
+            
+  #           # Verify images
+  #           echo ""
+  #           echo "=== Images in ACR ==="
+  #           az acr repository show-tags \
+  #             --name "${ACR}" \
+  #             --repository "${REPO}" \
+  #             --top 10 \
+  #             --orderby time_desc \
+  #             -o table
+            
+  #           # Get digest
+  #           DIGEST=$(az acr repository show \
+  #             --name "${ACR}" \
+  #             --image "${REPO}:${TAG}" \
+  #             --query digest -o tsv)
+            
+  #           # Export variables
+  #           echo "##vso[task.setvariable variable=presidioImage;isOutput=true]${IMAGE}"
+  #           echo "##vso[task.setvariable variable=presidioDigest;isOutput=true]${DIGEST}"
+  #           echo "##vso[task.setvariable variable=presidioLoginServer;isOutput=true]${LOGIN_SERVER}"
+            
+  #           echo ""
+  #           echo "======================================"
+  #           echo "✓ BUILD COMPLETED"
+  #           echo "======================================"
+  #           echo "Image: ${IMAGE}"
+  #           echo "Digest: ${DIGEST}"
+
+  # # ============================================================================
+  # # STAGE 4: Container Security - Watchtower
+  # # ============================================================================
+  # - stage: Scan_Watchtower
+  #   displayName: 'Scan Watchtower Image'
+  #   dependsOn: Build_Watchtower
+  #   condition: |
+  #     and(
+  #       succeeded(),
+  #       eq(variables['EnableScans'], 'true'),
+  #       eq(variables['EnableTrivy'], 'true')
+  #     )
+  #   variables:
+  #     watchtowerImage: $[ stageDependencies.Build_Watchtower.BuildWatchtower.outputs['BuildPushWatchtower.watchtowerImage'] ]
+  #   jobs:
+  #   - job: TrivyScanWatchtower
+  #     displayName: 'Trivy Scan - Watchtower'
+  #     steps:
+  #     - checkout: none
+        
+  #     - task: AzureCLI@2
+  #       displayName: 'Scan Watchtower Image'
+  #       inputs:
+  #         azureSubscription: '$(azureSubscription)'
+  #         scriptType: bash
+  #         scriptLocation: inlineScript
+  #         inlineScript: |
+  #           set -euo pipefail
+            
+  #           echo "Installing Trivy..."
+  #           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+  #           echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+  #           sudo apt-get update
+  #           sudo apt-get install -y trivy
+            
+  #           echo "Logging into ACR..."
+  #           az acr login --name "$(watchtower.registryName)"
+            
+  #           IMAGE="$(watchtowerImage)"
+  #           echo "Scanning: ${IMAGE}"
+            
+  #           trivy image \
+  #             --severity CRITICAL,HIGH,MEDIUM \
+  #             --format sarif \
+  #             --output trivy-watchtower.sarif \
+  #             "${IMAGE}" || true
+            
+  #           trivy image \
+  #             --severity CRITICAL,HIGH,MEDIUM \
+  #             --format table \
+  #             "${IMAGE}" || true
+  #       continueOnError: true
+        
+  #     - task: PublishBuildArtifacts@1
+  #       condition: always()
+  #       inputs:
+  #         PathtoPublish: 'trivy-watchtower.sarif'
+  #         ArtifactName: 'trivy-watchtower-scan'
+
+  # # ============================================================================
+  # # STAGE 5: Container Security - Presidio
+  # # ============================================================================
+  # - stage: Scan_Presidio
+  #   displayName: 'Scan Presidio Image'
+  #   dependsOn: Build_Presidio
+  #   condition: |
+  #     and(
+  #       succeeded(),
+  #       eq(variables['EnableScans'], 'true'),
+  #       eq(variables['EnableTrivy'], 'true')
+  #     )
+  #   variables:
+  #     presidioImage: $[ stageDependencies.Build_Presidio.BuildPresidio.outputs['BuildPushPresidio.presidioImage'] ]
+  #   jobs:
+  #   - job: TrivyScanPresidio
+  #     displayName: 'Trivy Scan - Presidio'
+  #     steps:
+  #     - checkout: none
+        
+  #     - task: AzureCLI@2
+  #       displayName: 'Scan Presidio Image'
+  #       inputs:
+  #         azureSubscription: '$(azureSubscription)'
+  #         scriptType: bash
+  #         scriptLocation: inlineScript
+  #         inlineScript: |
+  #           set -euo pipefail
+            
+  #           echo "Installing Trivy..."
+  #           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+  #           echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+  #           sudo apt-get update
+  #           sudo apt-get install -y trivy
+            
+  #           echo "Logging into ACR..."
+  #           az acr login --name "$(presidio.registryName)"
+            
+  #           IMAGE="$(presidioImage)"
+  #           echo "Scanning: ${IMAGE}"
+            
+  #           trivy image \
+  #             --severity CRITICAL,HIGH,MEDIUM \
+  #             --format sarif \
+  #             --output trivy-presidio.sarif \
+  #             "${IMAGE}" || true
+            
+  #           trivy image \
+  #             --severity CRITICAL,HIGH,MEDIUM \
+  #             --format table \
+  #             "${IMAGE}" || true
+  #       continueOnError: true
+        
+  #     - task: PublishBuildArtifacts@1
+  #       condition: always()
+  #       inputs:
+  #         PathtoPublish: 'trivy-presidio.sarif'
+  #         ArtifactName: 'trivy-presidio-scan'
+
+  # # ============================================================================
+  # # STAGE 6: Deploy - Watchtower Backend
+  # # ============================================================================
+  # - stage: Deploy_Watchtower
+  #   displayName: 'Deploy Watchtower Backend'
+  #   dependsOn:
+  #     - DetectChanges
+  #     - Build_Watchtower
+  #     - Scan_Watchtower
+    
+  #   # dependsOn: Build_Watchtower
+  #   # condition: |
+  #   #   and(
+  #   #     succeeded('Build_Watchtower'),
+  #   #     eq(dependencies.DetectChanges.outputs['PathAnalysis.DetectPaths.deployWatchtower'], 'true')
+  #   #   )
+
+  #   condition: |
+  #     and(
+  #       eq(variables['EnableDeploy'], 'true'),
+  #       eq(dependencies.DetectChanges.outputs['PathAnalysis.DetectPaths.deployWatchtower'], 'true'),
+  #       in(dependencies.Build_Watchtower.result, 'Succeeded'),
+  #       or(
+  #         in(dependencies.Scan_Watchtower.result, 'Succeeded', 'SucceededWithIssues', 'Skipped'),
+  #         eq(variables['EnableTrivy'], 'false')
+  #       )
+  #     )
+  #   variables:
+  #     watchtowerImage: $[ stageDependencies.Build_Watchtower.BuildWatchtower.outputs['BuildPushWatchtower.watchtowerImage'] ]
+  #   jobs:
+  #   - job: DeployWatchtowerApp  # Changed from 'deployment' to 'job'
+  #     displayName: 'Deploy Watchtower to App Service'
+  #     steps:
+  #     - checkout: none
+      
+  #     - task: AzureCLI@2
+  #       name: BackupConfig
+  #       displayName: 'Backup Current Configuration'
+  #       inputs:
+  #         # azureSubscription: '$(azureSubscription)'
+  #         # scriptType: bash
+  #         # scriptLocation: inlineScript
+  #         inlineScript: |
+  #           set -euo pipefail
+            
+  #           CURRENT_IMAGE=$(az webapp config container show \
+  #             --name "$(watchtower.appName)" \
+  #             --resource-group "$(watchtower.rgName)" \
+  #             --query "[0].value" -o tsv 2>/dev/null || echo "none")
+            
+  #           echo "Current image: ${CURRENT_IMAGE}"
+  #           echo "##vso[task.setvariable variable=previousWatchtowerImage]${CURRENT_IMAGE}"
+      
+  #     - task: AzureWebAppContainer@1
+  #       displayName: 'Deploy Watchtower Container'
+  #       inputs:
+  #         azureSubscription: '$(azureSubscription)'
+  #         appName: '$(watchtower.appName)'
+  #         resourceGroupName: '$(watchtower.rgName)'
+  #         imageName: '$(watchtowerImage)'
+      
+  #     - task: AzureAppServiceSettings@1
+  #       displayName: 'Configure Watchtower Settings'
+  #       inputs:
+  #         azureSubscription: '$(azureSubscription)'
+  #         appName: '$(watchtower.appName)'
+  #         resourceGroupName: '$(watchtower.rgName)'
+  #         appSettings: |
+  #           [
+  #             {
+  #               "name": "WEBSITES_PORT",
+  #               "value": "$(watchtower.appPort)"
+  #             },
+  #             {
+  #               "name": "BUILD_ID",
+  #               "value": "$(Build.BuildId)"
+  #             },
+  #             {
+  #               "name": "DEPLOYMENT_TIME",
+  #               "value": "$(System.StageStartTime)"
+  #             }
+  #           ]
+      
+  #     - bash: |
+  #         echo "Waiting for container startup..."
+  #         sleep 30
+  #       displayName: 'Wait for Startup'
+      
+  #     - task: AzureCLI@2
+  #       displayName: 'Health Check - Watchtower'
+  #       inputs:
+  #         azureSubscription: '$(azureSubscription)'
+  #         scriptType: bash
+  #         scriptLocation: inlineScript
+  #         inlineScript: |
+  #           set -euo pipefail
+            
+  #           APP_URL="https://$(watchtower.appName).azurewebsites.net"
+  #           HEALTH_URL="${APP_URL}$(watchtower.smokeTestPath)"
+            
+  #           echo "=== Watchtower Health Check ==="
+  #           echo "URL: ${HEALTH_URL}"
+            
+  #           for attempt in {1..20}; do
+  #             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 "${HEALTH_URL}" || echo "000")
+              
+  #             if [ "${HTTP_CODE}" = "200" ]; then
+  #               echo "✓ Watchtower is healthy (attempt ${attempt})"
+  #               curl -s "${HEALTH_URL}" | jq '.' 2>/dev/null || curl -s "${HEALTH_URL}"
+  #               exit 0
+  #             fi
+              
+  #             echo "Attempt ${attempt}/20: Status ${HTTP_CODE}"
+  #             sleep 10
+  #           done
+            
+  #           echo "✗ Health check failed"
+  #           exit 1
+  #       continueOnError: false
+
+  # # ============================================================================
+  # # STAGE 7: Deploy - Presidio Security Service
+  # # ============================================================================
+  # - stage: Deploy_Presidio
+  #   displayName: 'Deploy Presidio Security Service'
+  #   dependsOn:
+  #     - DetectChanges
+  #     - Build_Presidio
+  #     - Scan_Presidio
+  #   condition: |
+  #     and(
+  #       eq(variables['EnableDeploy'], 'true'),
+  #       in(dependencies.Build_Presidio.result, 'Succeeded'),
+  #       in(dependencies.Scan_Presidio.result, 'Succeeded', 'SucceededWithIssues', 'Skipped')
+  #     )
+  #   variables:
+  #     presidioImage: $[ stageDependencies.Build_Presidio.BuildPresidio.outputs['BuildPushPresidio.presidioImage'] ]
+  #   jobs:
+  #   - job: DeployPresidioApp  # Changed from 'deployment' to 'job'
+  #     displayName: 'Deploy Presidio to App Service'
+  #     steps:
+  #     - checkout: none
+      
+  #     - task: AzureCLI@2
+  #       displayName: 'Backup Current Configuration'
+  #       inputs:
+  #         azureSubscription: '$(azureSubscription)'
+  #         scriptType: bash
+  #         scriptLocation: inlineScript
+  #         inlineScript: |
+  #           set -euo pipefail
+            
+  #           CURRENT_IMAGE=$(az webapp config container show \
+  #             --name "$(presidio.appName)" \
+  #             --resource-group "$(presidio.rgName)" \
+  #             --query "[0].value" -o tsv 2>/dev/null || echo "none")
+            
+  #           echo "Current image: ${CURRENT_IMAGE}"
+  #           echo "##vso[task.setvariable variable=previousPresidioImage]${CURRENT_IMAGE}"
+      
+  #     - task: AzureWebAppContainer@1
+  #       displayName: 'Deploy Presidio Container'
+  #       inputs:
+  #         azureSubscription: '$(azureSubscription)'
+  #         appName: '$(presidio.appName)'
+  #         resourceGroupName: '$(presidio.rgName)'
+  #         imageName: '$(presidioImage)'
+      
+  #     - task: AzureAppServiceSettings@1
+  #       displayName: 'Configure Presidio Settings'
+  #       inputs:
+  #         azureSubscription: '$(azureSubscription)'
+  #         appName: '$(presidio.appName)'
+  #         resourceGroupName: '$(presidio.rgName)'
+  #         appSettings: |
+  #           [
+  #             {
+  #               "name": "WEBSITES_PORT",
+  #               "value": "$(presidio.appPort)"
+  #             },
+  #             {
+  #               "name": "BUILD_ID",
+  #               "value": "$(Build.BuildId)"
+  #             },
+  #             {
+  #               "name": "DEPLOYMENT_TIME",
+  #               "value": "$(System.StageStartTime)"
+  #             }
+  #           ]
+      
+  #     - bash: |
+  #         echo "Waiting for container startup..."
+  #         sleep 30
+  #       displayName: 'Wait for Startup'
+      
+  #     - task: AzureCLI@2
+  #       displayName: 'Health Check - Presidio'
+  #       inputs:
+  #         azureSubscription: '$(azureSubscription)'
+  #         scriptType: bash
+  #         scriptLocation: inlineScript
+  #         inlineScript: |
+  #           set -euo pipefail
+            
+  #           APP_URL="https://$(presidio.appName).azurewebsites.net"
+  #           HEALTH_URL="${APP_URL}$(presidio.smokeTestPath)"
+            
+  #           echo "=== Presidio Health Check ==="
+  #           echo "URL: ${HEALTH_URL}"
+            
+  #           for attempt in {1..20}; do
+  #             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 "${HEALTH_URL}" || echo "000")
+              
+  #             if [ "${HTTP_CODE}" = "200" ]; then
+  #               echo "✓ Presidio is healthy (attempt ${attempt})"
+  #               curl -s "${HEALTH_URL}" | jq '.' 2>/dev/null || curl -s "${HEALTH_URL}"
+  #               exit 0
+  #             fi
+              
+  #             echo "Attempt ${attempt}/20: Status ${HTTP_CODE}"
+  #             sleep 10
+  #           done
+            
+  #           echo "✗ Health check failed"
+  #           exit 1
+  #       continueOnError: false
+
+  # # ============================================================================
+  # # STAGE 8: Rollback Watchtower
+  # # ============================================================================
+  # - stage: Rollback_Watchtower
+  #   displayName: 'Rollback Watchtower (Manual)'
+  #   dependsOn: 
+  #     - Deploy_Watchtower
+  #   variables:
+  #     previousWatchtowerImage: $[ stageDependencies.Deploy_Watchtower.DeployWatchtowerApp.outputs['BackupConfig.previousImage'] ]
+  #   # condition: failed()
+  #   jobs:
+  #   - job: RollbackWatchtower
+  #     displayName: 'Rollback to Previous Image'
+  #     steps:
+  #     - task: AzureCLI@2
+  #       displayName: 'Rollback Watchtower'
+  #       inputs:
+  #         azureSubscription: '$(azureSubscription)'
+  #         scriptType: bash
+  #         scriptLocation: inlineScript
+  #         inlineScript: |
+  #           set -euo pipefail
+            
+  #           PREVIOUS_IMAGE="$(previousWatchtowerImage)"
+            
+  #           if [ "${PREVIOUS_IMAGE}" = "none" ] || [ -z "${PREVIOUS_IMAGE}" ]; then
+  #             echo "No previous image found, cannot rollback"
+  #             exit 1
+  #           fi
+            
+  #           echo "Rolling back to: ${PREVIOUS_IMAGE}"
+            
+  #           az webapp config container set \
+  #             --name "$(watchtower.appName)" \
+  #             --resource-group "$(watchtower.rgName)" \
+  #             --docker-custom-image-name "${PREVIOUS_IMAGE}"
+            
+  #           az webapp restart \
+  #             --name "$(watchtower.appName)" \
+  #             --resource-group "$(watchtower.rgName)"
+              
+  # # ============================================================================
+  # # STAGE 9: Post-Deployment Summary
+  # # ============================================================================
+  # - stage: Summary
+  #   displayName: 'Deployment Summary'
+  #   dependsOn:
+  #     - DetectChanges
+  #     - Deploy_Watchtower
+  #     - Deploy_Presidio
+  #   condition: always()
+  #   jobs:
+  #   - job: DeploymentSummary
+  #     displayName: 'Generate Deployment Report'
+  #     steps:
+  #     - checkout: none
+        
+  #     - bash: |
+  #         set -euo pipefail
+          
+  #         echo "=============================================="
+  #         echo "      MULTI-SERVICE DEPLOYMENT SUMMARY"
+  #         echo "=============================================="
+  #         echo ""
+  #         echo "Build ID: $(Build.BuildId)"
+  #         echo "Triggered by: $(Build.RequestedFor)"
+  #         echo "Source Branch: $(Build.SourceBranchName)"
+  #         echo "Commit: $(Build.SourceVersion)"
+  #         echo ""
+          
+  #         # Note: We can't access dependency results directly in bash, 
+  #         # but the stage itself shows the results
+          
+  #         echo "=== Watchtower Backend ==="
+  #         echo "  App Name: $(watchtower.appName)"
+  #         echo "  URL: https://$(watchtower.appName).azurewebsites.net"
+  #         echo "  Health: https://$(watchtower.appName).azurewebsites.net$(watchtower.smokeTestPath)"
+  #         echo ""
+          
+  #         echo "=== Presidio Security Service ==="
+  #         echo "  App Name: $(presidio.appName)"
+  #         echo "  URL: https://$(presidio.appName).azurewebsites.net"
+  #         echo "  Health: https://$(presidio.appName).azurewebsites.net$(presidio.smokeTestPath)"
+  #         echo ""
+          
+  #         echo "=============================================="
+  #         echo "Build logs: $(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+  #         echo "=============================================="
+  #       displayName: 'Display Summary'
