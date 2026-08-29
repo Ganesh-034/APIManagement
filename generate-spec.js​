@@ -11,7 +11,7 @@ const options = {
   definition: {
     openapi: '3.0.1',
     info: {
-      title: 'soc-watchtower-backend-dev',
+      title: 'soc-watchtower-backend-dev-test',
       description: '',
       version: '1.0',
     },
@@ -119,4 +119,4 @@ if (isFirstRun || hasChanges) {
   console.log(`📝 Written to ${outputPath}`);
 } else {
   console.log('📄 File not rewritten (no changes).');
-}​
+}
