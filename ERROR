@@ -1,25 +1,52 @@
-
-          - task: AzureCLI@2
-            displayName: Import OpenAPI
-            inputs:
-              azureSubscription: $(azureSubscription)
-              scriptType: bash
-              scriptLocation: inlineScript
-
-              inlineScript: |
-
-                set -e
-
-                az apim api import \
-                  --resource-group "$(apimResourceGroup)" \
-                  --service-name "$(apimServiceName)" \
-                  --api-id "$(apimApiId)" \
-                  --path "$(apimApiPath)" \
-                  --display-name "$(apimApiId)" \
-                  --specification-format OpenApiJson \
-                  --specification-path "$(Pipeline.Workspace)/openapi/openapi.json"
-          - bash: |
-              set -euo pipefail
-
-              SCRIPT_FILE="$(Build.SourcesDirectory)/scripts/apply-apim-operation-policies.sh"
-              POLICY_FILE="$(Build.SourcesDirectory)/infra/global-policy.xml"
+2026-08-30T05:28:44.0038895Z ##[section]Starting: Import OpenAPI
+2026-08-30T05:28:44.0057651Z ==============================================================================
+2026-08-30T05:28:44.0057828Z Task         : Azure CLI
+2026-08-30T05:28:44.0057924Z Description  : Run Azure CLI commands against an Azure subscription in a PowerShell Core/Shell script when running on Linux agent or PowerShell/PowerShell Core/Batch script when running on Windows agent.
+2026-08-30T05:28:44.0058184Z Version      : 2.278.1
+2026-08-30T05:28:44.0058275Z Author       : Microsoft Corporation
+2026-08-30T05:28:44.0058389Z Help         : https://docs.microsoft.com/azure/devops/pipelines/tasks/deploy/azure-cli
+2026-08-30T05:28:44.0058521Z ==============================================================================
+2026-08-30T05:28:44.0972243Z [Host] Selected Node version: Node24 (Strategy: Node24Strategy)
+2026-08-30T05:28:44.3356356Z [command]/usr/bin/az version
+2026-08-30T05:28:44.6422208Z {
+2026-08-30T05:28:44.6434366Z   "azure-cli": "2.89.1",
+2026-08-30T05:28:44.6454319Z   "azure-cli-core": "2.89.1",
+2026-08-30T05:28:44.6474242Z   "azure-cli-telemetry": "1.1.0",
+2026-08-30T05:28:44.6494162Z   "extensions": {
+2026-08-30T05:28:44.6494581Z     "azure-devops": "1.0.6"
+2026-08-30T05:28:44.6514227Z   }
+2026-08-30T05:28:44.6534103Z }
+2026-08-30T05:28:44.6614308Z Setting AZURE_CONFIG_DIR env variable to: /home/vsts/work/_temp/.azclitask-dRDZhw
+2026-08-30T05:28:44.6654738Z Setting active cloud to: AzureCloud
+2026-08-30T05:28:44.6814286Z [command]/usr/bin/az cloud set -n AzureCloud
+2026-08-30T05:28:48.1175593Z [command]/usr/bin/az login --service-principal -u *** --tenant fe8c6234-bf85-48c7-b462-1eefe98d567d --allow-no-subscriptions --federated-token ***
+2026-08-30T05:28:49.0234693Z [
+2026-08-30T05:28:49.0244083Z   {
+2026-08-30T05:28:49.0276319Z     "cloudName": "AzureCloud",
+2026-08-30T05:28:49.0300318Z     "homeTenantId": "fe8c6234-bf85-48c7-b462-1eefe98d567d",
+2026-08-30T05:28:49.0324383Z     "id": "0c123281-74e2-43d2-bbc3-8526be0786bc",
+2026-08-30T05:28:49.0344443Z     "isDefault": true,
+2026-08-30T05:28:49.0344971Z     "managedByTenants": [],
+2026-08-30T05:28:49.0346303Z     "name": "TTS-SOC-Watchtower(Prod)",
+2026-08-30T05:28:49.0346785Z     "state": "Enabled",
+2026-08-30T05:28:49.0347245Z     "tenantId": "fe8c6234-bf85-48c7-b462-1eefe98d567d",
+2026-08-30T05:28:49.0347705Z     "user": {
+2026-08-30T05:28:49.0348289Z       "name": "***",
+2026-08-30T05:28:49.0348757Z       "type": "servicePrincipal"
+2026-08-30T05:28:49.0349173Z     }
+2026-08-30T05:28:49.0349550Z   }
+2026-08-30T05:28:49.0349950Z ]
+2026-08-30T05:28:49.0356539Z [command]/usr/bin/az account set --subscription 0c123281-74e2-43d2-bbc3-8526be0786bc
+2026-08-30T05:28:49.4465384Z [command]/usr/bin/bash /home/vsts/work/_temp/azureclitaskscript1788067724326.sh
+2026-08-30T05:28:49.4465841Z =====================
+2026-08-30T05:28:49.4665021Z OpenAPI being imported:
+2026-08-30T05:28:49.4694359Z =====================
+2026-08-30T05:28:49.4894519Z 
+2026-08-30T05:28:49.4895072Z Endpoints in OpenAPI:
+2026-08-30T05:28:49.4914332Z jq: error: syntax error, unexpected INVALID_CHARACTER (Unix shell quoting issues?) at <top-level>, line 1:
+2026-08-30T05:28:49.4984626Z .paths | to_entries[] | .key as $path | .value | keys[] | "\(. | ascii_upcase \($path)"                                                                              
+2026-08-30T05:28:49.5004591Z jq: 1 compile error
+2026-08-30T05:28:49.5007759Z 
+2026-08-30T05:28:49.5037813Z ##[error]Script failed with exit code: 3
+2026-08-30T05:28:49.5048652Z [command]/usr/bin/az account clear
+2026-08-30T05:28:50.1325597Z ##[section]Finishing: Import OpenAPI
