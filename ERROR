@@ -1,67 +1,25 @@
-Condition evaluation
-Result: Condition was met
 
-Expression:
-  succeeded()
+          - task: AzureCLI@2
+            displayName: Import OpenAPI
+            inputs:
+              azureSubscription: $(azureSubscription)
+              scriptType: bash
+              scriptLocation: inlineScript
 
-Dependencies:
-  No dependencies
-Starting: Validate APIM Policy Script
-==============================================================================
-Task         : Bash
-Description  : Run a Bash script on macOS, Linux, or Windows
-Version      : 3.278.0
-Author       : Microsoft Corporation
-Help         : https://docs.microsoft.com/azure/devops/pipelines/tasks/utility/bash
-==============================================================================
-[Host] Selected Node version: Node24 (Strategy: Node24Strategy)
-Generating script.
-========================== Starting Command Output ===========================
-/usr/bin/bash /home/vsts/work/_temp/51ae1860-afe3-4e9f-8a43-2dce47eeb5f0.sh
-Checking script location:
--rw-r--r-- 1 vsts vsts 5860 Aug 29 13:42 /home/vsts/work/1/s/scripts/apply-apim-operation-policies.sh
-Checking Bash syntax:
-/home/vsts/work/1/s/scripts/apply-apim-operation-policies.sh: line 31: syntax error near unexpected token `$'{\r''
-/home/vsts/work/1/s/scripts/apply-apim-operation-policies.sh: line 31: `is_excluded() {
-'
+              inlineScript: |
 
-##[error]Bash exited with code '2'.
-Finishing: Validate APIM Policy Script
+                set -e
 
+                az apim api import \
+                  --resource-group "$(apimResourceGroup)" \
+                  --service-name "$(apimServiceName)" \
+                  --api-id "$(apimApiId)" \
+                  --path "$(apimApiPath)" \
+                  --display-name "$(apimApiId)" \
+                  --specification-format OpenApiJson \
+                  --specification-path "$(Pipeline.Workspace)/openapi/openapi.json"
+          - bash: |
+              set -euo pipefail
 
-Image: ubuntu-latest
-Agent: Azure Pipelines 1
-Started: Today at 7:12 pm
-Duration: 1m 8s
-
-Condition evaluation
-Result: Condition was met
-
-Dependencies:
-  - Build Watchtower
-
-Job preparation parameters
-ContinueOnError: False
-TimeoutInMinutes: 60
-CancelTimeoutInMinutes: 5
-Expand:
-  MaxConcurrency: 0
-  ########## System Pipeline Decorator(s) ##########
-
-  Begin evaluating template 'system-pre-steps.yml'
-Evaluating: eq('true', variables['system.debugContext'])
-Expanded: eq('true', Null)
-Result: False
-Evaluating: resources['repositories']['self']
-Expanded: Object
-Result: True
-Evaluating: not(containsValue(job['steps']['*']['task']['id'], '6d15af64-176c-496d-b583-fd2ae21d4df4'))
-Expanded: not(containsValue(Object, '6d15af64-176c-496d-b583-fd2ae21d4df4'))
-Result: False
-Finished evaluating template 'system-pre-steps.yml'
-********************************************************************************
-Template and static variable resolution complete. Final runtime YAML document:
-steps: []
-
-
-  MaxConcurrency: 0
+              SCRIPT_FILE="$(Build.SourcesDirectory)/scripts/apply-apim-operation-policies.sh"
+              POLICY_FILE="$(Build.SourcesDirectory)/infra/global-policy.xml"
