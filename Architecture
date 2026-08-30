@@ -1,0 +1,50 @@
+                    SOURCE CODE
+                        │
+                        ▼
+                 generate-spec.js
+                        │
+                        ▼
+                   openapi.json
+                        │
+                        ▼
+              Validate OpenAPI
+                        │
+                        ▼
+          Snapshot current APIM
+                        │
+                        ▼
+             Detect differences
+                        │
+          ┌─────────────┼─────────────┐
+          │             │             │
+        Added        Changed       Removed
+          │             │             │
+          │             │             ▼
+          │             │        Approval
+          │             │             │
+          └─────────────┼─────────────┘
+                        ▼
+                  APIM Import
+                        │
+                        ▼
+             Detect policy change
+                        │
+               ┌────────┴────────┐
+               │                 │
+             YES                  NO
+               │                 │
+               ▼                 ▼
+         ALL operations    Added/Changed
+               │            operations
+               └────────┬────────┘
+                        ▼
+                 Apply policies
+                        │
+                        ▼
+                  Verify policies
+                        │
+                        ▼
+                Verify operations
+                        │
+                        ▼
+                     DONE
