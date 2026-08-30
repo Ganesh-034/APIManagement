@@ -1,0 +1,58 @@
+import express from "express";
+import { getUsers, logoutUser } from "../../controllers/user/user.controller.js";
+
+const router = express.Router();
+
+router.get("/", getUsers);
+/**
+ * @openapi
+ * /api/user/logout:
+ *   post:
+ *     summary: Logout user
+ *     description: Logs out the current user. Intentionally does not require authentication so logout can still succeed even with an expired/invalid session; the associated user (if any) is logged safely as optional.
+ *     operationId: logout
+ *     tags:
+ *       - Logout
+ *     responses:
+ *       204:
+ *         description: User logged out successfully (no content)
+ */
+// ✅ LOGOUT MUST NOT HAVE AUTH MIDDLEWARE
+router.post("/logout", logoutUser);
+
+/**
+ * @openapi
+ * /api/user/apim-test:
+ *   get:
+ *     summary: APIM automation test endpoint
+ *     tags:
+ *       - APIM-Test
+ *     responses:
+ *       200:
+ *         description: APIM test successful
+ */
+router.get("/apim-test", (req, res) => {
+  res.status(200).json({
+    message: "APIM Automation Test"
+  });
+});
+/**
+ * @openapi
+ * /api/user/apim-pipeline-test:
+ *   get:
+ *     summary: APIM pipeline validation endpoint
+ *     tags:
+ *       - APIM-Test
+ *     responses:
+ *       200:
+ *         description: APIM pipeline validation successful
+ */
+router.get("/apim-pipeline-test", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "APIM Pipeline Validation Successful",
+    source: "Azure DevOps APIM Automation"
+  });
+});
+
+export default router;
