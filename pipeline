@@ -1206,8 +1206,36 @@
               scriptLocation: inlineScript
 
               inlineScript: |
+                set -euo pipefail
 
-                set -e
+                OPENAPI_FILE="$(Pipeline.Workspace)/openapi/openapi.json"
+
+                echo "====================="
+                echo "OpenAPI being imported:"
+                echo "====================="
+
+                if [ ! -f "$OPENAPI_FILE" ]; then
+                  echo "ERROR: OpenAPI file not found:"
+                  echo "$OPENAPI_FILE"
+                  exit 1
+                fi
+
+                echo ""
+                echo "Endpoints in OpenAPI:"
+
+                jq -r '
+                  .paths
+                  | to_entries[]
+                  | .key as $path
+                  | .value
+                  | keys[]
+                  | "\(. | ascii_upcase) \($path)"
+                ' "$OPENAPI_FILE"
+
+                echo ""
+                echo "====================="
+                echo "Importing OpenAPI into APIM"
+                echo "====================="
 
                 az apim api import \
                   --resource-group "$(apimResourceGroup)" \
@@ -1216,33 +1244,62 @@
                   --path "$(apimApiPath)" \
                   --display-name "$(apimApiId)" \
                   --specification-format OpenApiJson \
-                  --specification-path "$(Pipeline.Workspace)/openapi/openapi.json"
+                  --specification-path "$OPENAPI_FILE"
+
+                echo ""
+                echo "✅ OpenAPI import completed successfully."
           - bash: |
               set -euo pipefail
 
               SCRIPT_FILE="$(Build.SourcesDirectory)/scripts/apply-apim-operation-policies.sh"
+              POLICY_FILE="$(Build.SourcesDirectory)/infra/global-policy.xml"
 
-              if [ ! -f "${SCRIPT_FILE}" ]; then
-                echo "##vso[task.logissue type=error]Script not found: ${SCRIPT_FILE}"
+              echo "=========================="
+              echo "APIM Automation File Validation"
+              echo "=========================="
+
+              echo ""
+              echo "Normalizing CRLF -> LF..."
+              sed -i 's/\r$//' "${SCRIPT_FILE}"
+
+              echo "Normalizing policy XML..."
+              sed -i 's/\r$//' "${POLICY_FILE}"
+
+              echo ""
+              echo "Script:"
+              file "${SCRIPT_FILE}"
+
+              echo ""
+              echo "Policy:"
+              file "${POLICY_FILE}"
+
+              echo ""
+              echo "validating bash syntax..."
+              bash -n "${SCRIPT_FILE}"
+
+              echo ""
+              echo "checking polciy file..."
+
+              if [ ! -f "${POLICY_FILE}" ]; then
+                echo "##vso[task.logissue type=error]Policy file not found: ${POLICY_FILE}"
                 exit 1
               fi
 
-              echo "Script before conversion:"
-              file "${SCRIPT_FILE}"
+              if ! grep -q "<policies>" "${POLICY_FILE}"; then
+                echo "##vso[task.logissue type=error]Invalid APIM policy file"
+                exit 1
+              fi
 
-              echo "Converting CRLF line endings to LF..."
-              sed -i 's/\r$//' "${SCRIPT_FILE}"
-
-              echo "Script after conversion:"
-              file "${SCRIPT_FILE}"
-
-              echo "Validating Bash syntax..."
-              bash -n "${SCRIPT_FILE}"
+              if ! grep -q "<allowed-methods>" "${POLICY_FILE}"; then
+                echo "##vso[task.logissue type=error]allowed-methods not found in policy file: ${POLICY_FILE}"
+                exit 1
+              fi
 
               chmod +x "${SCRIPT_FILE}"
 
-              echo "APIM policy script uses LF and has valid Bash syntax."
-            displayName: Normalize and Validate APIM Policy Script
+              echo ""
+              echo "APIM script and policy file validation completed successfully."
+            displayName: Normalize and Validate APIM Script and Policy
           - task: AzureCLI@2
             displayName: Apply and Verify Method-Specific Policies
             inputs:
