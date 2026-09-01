@@ -2593,8 +2593,3 @@ variables:
   #         echo "Build logs: $(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
   #         echo "=============================================="
   #       displayName: 'Display Summary'
-
-
-/azure-pipelines-development.yml (Line: 50, Col: 5): A sequence was not expected
-/azure-pipelines-development.yml: (Line: 656, Col: 15, Idx: 23679) - (Line: 656, Col: 15, Idx: 23679): While scanning a simple key, could not find expected ':'.
-Object reference not set to an instance of an object.
