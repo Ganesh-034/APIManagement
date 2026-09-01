@@ -853,7 +853,6 @@ stages:
           - task: AzureCLI@2
             name: BuildPush
             displayName: Build & Push Image
-            condition: false
             inputs:
               azureSubscription: $(azureSubscription)
               scriptType: bash
@@ -931,7 +930,6 @@ stages:
           - task: AzureCLI@2
             name: BuildPush
             displayName: Build & Push Image
-            condition: false
             inputs:
               azureSubscription: $(azureSubscription)
               scriptType: bash
@@ -1334,12 +1332,7 @@ stages:
       - Security
       - Build_Watchtower
       - Scan_Watchtower
-    condition: >
-      and(
-        in(dependencies.Security.result, 'Succeeded'),
-        in(dependencies.Build_Watchtower.result, 'Succeeded'),
-        in(dependencies.Scan_Watchtower.result, 'Succeeded', 'SucceededWithIssues', 'Skipped')
-      )
+    condition: false
     variables:
       image: $[ stageDependencies.Build_Watchtower.Build.outputs['BuildPush.image'] ]
     jobs:
@@ -1429,12 +1422,7 @@ stages:
       - Security
       - Build_Presidio
       - Scan_Presidio
-    condition: >
-      and(
-        in(dependencies.Security.result, 'Succeeded'),
-        in(dependencies.Build_Presidio.result, 'Succeeded'),
-        in(dependencies.Scan_Presidio.result, 'Succeeded', 'SucceededWithIssues', 'Skipped')
-      )
+    condition: false
     variables:
       image: $[ stageDependencies.Build_Presidio.Build.outputs['BuildPush.image'] ]
     jobs:
