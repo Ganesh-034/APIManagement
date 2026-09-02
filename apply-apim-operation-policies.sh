@@ -216,4 +216,4 @@ if [ "${FAILED}" -gt 0 ]; then
   exit 1
 fi
 
-echo "All applicable operation policies completed successfully."
+echo "All applicable operation policies completed successfully done."
