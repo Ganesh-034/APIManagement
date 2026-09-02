@@ -830,7 +830,7 @@ stages:
           - bash: |
               set -euo pipefail
               npm ci
-              npm run generate-openapi
+              node openapi/generate-spec.js
               echo "Generated files:"
               find . -name "*.json" | grep -i openapi || true
 
@@ -1143,24 +1143,25 @@ stages:
               targetPath: $(System.DefaultWorkingDirectory)/reports/trivy.sarif
               artifactName: trivy-presidio
             displayName: Publish Trivy Report
-    - stage: APIM_Test
-      displayName: APIM Automation Test
-      dependsOn:
-        - Build_Watchtower
-      condition: succeeded()
+  - stage: APIM_Test
+    displayName: APIM Automation Test
+    dependsOn:
+      - Build_Watchtower
+    condition: succeeded()
 
-      jobs:
-        - job: Import_APIM
-          steps:
+    jobs:
+      - job: Import_APIM
+        steps:
           - checkout: self
+
           - task: DownloadPipelineArtifact@2
             inputs:
               artifactName: openapi-files
               targetPath: $(Pipeline.Workspace)/openapi
+
           - bash: |
               echo "Download OpenAPI files:"
               find $(Pipeline.Workspace)/openapi -type f
-
               echo ""
               ls -R $(Pipeline.Workspace)/openapi
             displayName: Verify OpenAPI Artifact
@@ -1171,7 +1172,8 @@ stages:
               echo ""
               echo "openAPI Info"
               cat $(Pipeline.Workspace)/openapi/openapi.json | jq '.info'
-            displayName: Inspect OpenAPI 
+            displayName: Inspect OpenAPI
+
           - task: AzureCLI@2
             displayName: List Existing APIs
             inputs:
@@ -1183,6 +1185,7 @@ stages:
                   --resource-group "$(apimResourceGroup)" \
                   --service-name "$(apimServiceName)" \
                   -o table
+
           - task: AzureCLI@2
             displayName: Show Current API
             inputs:
@@ -1191,9 +1194,9 @@ stages:
               scriptLocation: inlineScript
               inlineScript: |
                 az apim api show \
-                   --resource-group "$(apimResourceGroup)" \
-                   --service-name "$(apimServiceName)" \
-                   --api-id "$(apimApiId)"
+                  --resource-group "$(apimResourceGroup)" \
+                  --service-name "$(apimServiceName)" \
+                  --api-id "$(apimApiId)"
 
           - task: AzureCLI@2
             displayName: Import OpenAPI
@@ -1201,7 +1204,6 @@ stages:
               azureSubscription: $(azureSubscription)
               scriptType: bash
               scriptLocation: inlineScript
-
               inlineScript: |
                 set -euo pipefail
 
@@ -1245,6 +1247,7 @@ stages:
 
                 echo ""
                 echo "✅ OpenAPI import completed successfully."
+
           - bash: |
               set -euo pipefail
 
@@ -1297,6 +1300,7 @@ stages:
               echo ""
               echo "APIM script and policy file validation completed successfully."
             displayName: Normalize and Validate APIM Script and Policy
+
           - task: AzureCLI@2
             displayName: Apply and Verify Method-Specific Policies
             inputs:
@@ -1309,8 +1313,8 @@ stages:
               APIM_RESOURCE_GROUP: $(apimResourceGroup)
               APIM_SERVICE_NAME: $(apimServiceName)
               APIM_API_ID: $(apimApiId)
-              APIM_POLICY_FILE: $(Build.SourcesDirectory)/infra/global-policy.xml 
-                    
+              APIM_POLICY_FILE: $(Build.SourcesDirectory)/infra/global-policy.xml
+
           - task: AzureCLI@2
             displayName: Verify Imported API
             inputs:
@@ -1318,7 +1322,6 @@ stages:
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
-
                 az apim api show \
                   --resource-group "$(apimResourceGroup)" \
                   --service-name "$(apimServiceName)" \
