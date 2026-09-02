@@ -1,298 +1,52 @@
 
+9/2/2026, 1:09:21.523 PM
+|2365bd6d-48795c2d9ddf84ba.
+GET /dev/api/docs/filters
+https://soc-watchtower-api.azure-api.net/dev/api/docs/filters
+False
+500
+357.1171
+250ms-500ms
+request
+{"Region":"Southeast Asia","HTTP Method":"GET","Service Type":"API Management","Service Name":"soc-watchtower-api","Request Id":"3d8a5261-5a57-444d-8ef8-d475e1fa2696","Service ID":"soc-watchtower-api","Cache":"None","API Revision":"1","API Type":"http","API Name":"soc-watchtower-backend-dev","Operation Name":"get-document-filters"}
 timestamp [UTC]
-2026-09-02T05:00:17.7085098Z
+2026-09-02T07:39:21.5237398Z
 id
-|2365bb12-48795c2d9ddf84ba.2365bb13_
-target
-https://soc-watchtower-backend-dev-epfsh5f4fcbgbsd4.southeastasia-01.azurewebsites.net | cid-v1:
-type
-HTTP
+|2365bd6d-48795c2d9ddf84ba.
 name
-GET /api/rule-management/stats/open-prs
-data
-GET - https://soc-watchtower-backend-dev-epfsh5f4fcbgbsd4.southeastasia-01.azurewebsites.net/api/rule-management/stats/open-prs
+GET /dev/api/docs/filters
+url
+https://soc-watchtower-api.azure-api.net/dev/api/docs/filters
 success
 False
 resultCode
 500
 duration
-653.3366
-performanceBucket
-500ms-1sec
-itemType
-dependency
-customDimensions
-{"Region":"Southeast Asia","Source":"forward-request","Service Type":"API Management","Service Name":"soc-watchtower-api","Protocol":"HTTP/1.1","Service ID":"soc-watchtower-api","Cache":"None","Method":"GET"}
-customMeasurements
-{"Client Time (in ms)":0,"Gateway Time (in ms)":0,"Authentication Tokens Time (in ms)":0,"Backend Time (in ms)":652,"Cache Time (in ms)":0}
-operation_Name
-soc-watchtower-backend-dev;rev=1 - get-open-pr
-operation_Id
-2365bb12-48795c2d9ddf84ba
-operation_ParentId
-|2365bb12-48795c2d9ddf84ba.
-client_Type
-PC
-client_IP
-0.0.0.0
-client_City
-Singapore
-client_StateOrProvince
-Central Singapore
-client_CountryOrRegion
-Singapore
-cloud_RoleName
-soc-watchtower-api Southeast Asia
-cloud_RoleInstance
-soc-watchtower-api Southeast Asia
-appId
-a98599fb-5cfa-4c20-81e3-0b7cfb9b34c6
-appName
-/subscriptions/0c123281-74e2-43d2-bbc3-8526be0786bc/resourcegroups/appsvc_linux_southeastasia_basic/providers/microsoft.insights/components/soc-watchtower-backend
-iKey
-79a3c5e2-8bc6-4905-a318-3385621406cb
-sdkVersion
-apim:0.52.4150.0
-itemId
-4220e689-a68b-11f1-aa9d-00224857657e
-itemCount
-1
-_ResourceId
-/subscriptions/0c123281-74e2-43d2-bbc3-8526be0786bc/resourcegroups/appsvc_linux_southeastasia_basic/providers/microsoft.insights/components/soc-watchtower-backend
-timestamp [UTC]
-2026-09-02T05:00:20.6098061Z
-id
-|2365bb14-48795c2d9ddf84ba.2365bb15_
-target
-https://soc-watchtower-backend-dev-epfsh5f4fcbgbsd4.southeastasia-01.azurewebsites.net | cid-v1:
-type
-HTTP
-name
-GET /api/rule-management/stats/open-prs
-data
-GET - https://soc-watchtower-backend-dev-epfsh5f4fcbgbsd4.southeastasia-01.azurewebsites.net/api/rule-management/stats/open-prs
-success
-False
-resultCode
-500
-duration
-311.1147
+357.1171
 performanceBucket
 250ms-500ms
 itemType
-dependency
+request
 customDimensions
-{"Region":"Southeast Asia","Source":"forward-request","Service Type":"API Management","Service Name":"soc-watchtower-api","Protocol":"HTTP/1.1","Service ID":"soc-watchtower-api","Cache":"None","Method":"GET"}
+{"Region":"Southeast Asia","HTTP Method":"GET","Service Type":"API Management","Service Name":"soc-watchtower-api","Request Id":"3d8a5261-5a57-444d-8ef8-d475e1fa2696","Service ID":"soc-watchtower-api","Cache":"None","API Revision":"1","API Type":"http","API Name":"soc-watchtower-backend-dev","Operation Name":"get-document-filters"}
 customMeasurements
-{"Client Time (in ms)":0,"Gateway Time (in ms)":0,"Authentication Tokens Time (in ms)":0,"Backend Time (in ms)":310,"Cache Time (in ms)":0}
-operation_Name
-soc-watchtower-backend-dev;rev=1 - get-open-pr
-operation_Id
-2365bb14-48795c2d9ddf84ba
-operation_ParentId
-|2365bb14-48795c2d9ddf84ba.
-client_Type
-PC
-client_IP
-0.0.0.0
-client_City
-Singapore
-client_StateOrProvince
-Central Singapore
-client_CountryOrRegion
-Singapore
-cloud_RoleName
-soc-watchtower-api Southeast Asia
-cloud_RoleInstance
-soc-watchtower-api Southeast Asia
-appId
-a98599fb-5cfa-4c20-81e3-0b7cfb9b34c6
-appName
-/subscriptions/0c123281-74e2-43d2-bbc3-8526be0786bc/resourcegroups/appsvc_linux_southeastasia_basic/providers/microsoft.insights/components/soc-watchtower-backend
-iKey
-79a3c5e2-8bc6-4905-a318-3385621406cb
-sdkVersion
-apim:0.52.4150.0
-itemId
-4220e68a-a68b-11f1-aa9d-00224857657e
-itemCount
-1
-_ResourceId
-/subscriptions/0c123281-74e2-43d2-bbc3-8526be0786bc/resourcegroups/appsvc_linux_southeastasia_basic/providers/microsoft.insights/components/soc-watchtower-backend
-timestamp [UTC]
-2026-09-02T07:39:00.6634803Z
-id
-|2365bd2f-48795c2d9ddf84ba.2365bd32_
-target
-https://soc-watchtower-backend-dev-epfsh5f4fcbgbsd4.southeastasia-01.azurewebsites.net | cid-v1:
-type
-HTTP
-name
-GET /api/docs/bulk
-data
-GET - https://soc-watchtower-backend-dev-epfsh5f4fcbgbsd4.southeastasia-01.azurewebsites.net/api/docs/bulk
-success
-False
-resultCode
-500
-duration
-624.2752
-performanceBucket
-500ms-1sec
-itemType
-dependency
-customDimensions
-{"Region":"Southeast Asia","Source":"forward-request","Service Type":"API Management","Service Name":"soc-watchtower-api","Protocol":"HTTP/1.1","Service ID":"soc-watchtower-api","Cache":"None","Method":"GET"}
-customMeasurements
-{"Client Time (in ms)":0,"Gateway Time (in ms)":1,"Authentication Tokens Time (in ms)":0,"Backend Time (in ms)":844,"Cache Time (in ms)":0}
-operation_Name
-soc-watchtower-backend-dev;rev=1 - get-bulk
-operation_Id
-2365bd2f-48795c2d9ddf84ba
-operation_ParentId
-|2365bd2f-48795c2d9ddf84ba.
-client_Type
-PC
-client_IP
-0.0.0.0
-client_City
-Singapore
-client_StateOrProvince
-Central Singapore
-client_CountryOrRegion
-Singapore
-cloud_RoleName
-soc-watchtower-api Southeast Asia
-cloud_RoleInstance
-soc-watchtower-api Southeast Asia
-appId
-a98599fb-5cfa-4c20-81e3-0b7cfb9b34c6
-appName
-/subscriptions/0c123281-74e2-43d2-bbc3-8526be0786bc/resourcegroups/appsvc_linux_southeastasia_basic/providers/microsoft.insights/components/soc-watchtower-backend
-iKey
-79a3c5e2-8bc6-4905-a318-3385621406cb
-sdkVersion
-apim:0.52.4150.0
-itemId
-6defb12d-a6a1-11f1-aa9f-002248594f58
-itemCount
-1
-_ResourceId
-/subscriptions/0c123281-74e2-43d2-bbc3-8526be0786bc/resourcegroups/appsvc_linux_southeastasia_basic/providers/microsoft.insights/components/soc-watchtower-backend
-timestamp [UTC]
-2026-09-02T07:39:00.6686146Z
-id
-|2365bd31-48795c2d9ddf84ba.2365bd33_
-target
-https://soc-watchtower-backend-dev-epfsh5f4fcbgbsd4.southeastasia-01.azurewebsites.net | cid-v1:
-type
-HTTP
-name
-GET /api/docs/stats
-data
-GET - https://soc-watchtower-backend-dev-epfsh5f4fcbgbsd4.southeastasia-01.azurewebsites.net/api/docs/stats
-success
-False
-resultCode
-500
-duration
-1101.1655
-performanceBucket
-1sec-3sec
-itemType
-dependency
-customDimensions
-{"Region":"Southeast Asia","Source":"forward-request","Service Type":"API Management","Service Name":"soc-watchtower-api","Protocol":"HTTP/1.1","Service ID":"soc-watchtower-api","Cache":"None","Method":"GET"}
-customMeasurements
-{"Client Time (in ms)":0,"Gateway Time (in ms)":0,"Authentication Tokens Time (in ms)":0,"Backend Time (in ms)":1314,"Cache Time (in ms)":0}
-operation_Name
-soc-watchtower-backend-dev;rev=1 - get-stats
-operation_Id
-2365bd31-48795c2d9ddf84ba
-operation_ParentId
-|2365bd31-48795c2d9ddf84ba.
-client_Type
-PC
-client_IP
-0.0.0.0
-client_City
-Singapore
-client_StateOrProvince
-Central Singapore
-client_CountryOrRegion
-Singapore
-cloud_RoleName
-soc-watchtower-api Southeast Asia
-cloud_RoleInstance
-soc-watchtower-api Southeast Asia
-appId
-a98599fb-5cfa-4c20-81e3-0b7cfb9b34c6
-appName
-/subscriptions/0c123281-74e2-43d2-bbc3-8526be0786bc/resourcegroups/appsvc_linux_southeastasia_basic/providers/microsoft.insights/components/soc-watchtower-backend
-iKey
-79a3c5e2-8bc6-4905-a318-3385621406cb
-sdkVersion
-apim:0.52.4150.0
-itemId
-6defb133-a6a1-11f1-aa9f-002248594f58
-itemCount
-1
-_ResourceId
-/subscriptions/0c123281-74e2-43d2-bbc3-8526be0786bc/resourcegroups/appsvc_linux_southeastasia_basic/providers/microsoft.insights/components/soc-watchtower-backend
-9/2/2026, 1:09:00.686 PM
-|2365bd30-48795c2d9ddf84ba.2365bd34_
-https://soc-watchtower-backend-dev-epfsh5f4fcbgbsd4.southeastasia-01.azurewebsites.net | cid-v1:
-HTTP
-GET /api/docs/filters
-GET - https://soc-watchtower-backend-dev-epfsh5f4fcbgbsd4.southeastasia-01.azurewebsites.net/api/docs/filters
-False
-500
-1018.8608
-1sec-3sec
-dependency
-{"Region":"Southeast Asia","Source":"forward-request","Service Type":"API Management","Service Name":"soc-watchtower-api","Protocol":"HTTP/1.1","Service ID":"soc-watchtower-api","Cache":"None","Method":"GET"}
-timestamp [UTC]
-2026-09-02T07:39:00.686271Z
-id
-|2365bd30-48795c2d9ddf84ba.2365bd34_
-target
-https://soc-watchtower-backend-dev-epfsh5f4fcbgbsd4.southeastasia-01.azurewebsites.net | cid-v1:
-type
-HTTP
-name
-GET /api/docs/filters
-data
-GET - https://soc-watchtower-backend-dev-epfsh5f4fcbgbsd4.southeastasia-01.azurewebsites.net/api/docs/filters
-success
-False
-resultCode
-500
-duration
-1018.8608
-performanceBucket
-1sec-3sec
-itemType
-dependency
-customDimensions
-{"Region":"Southeast Asia","Source":"forward-request","Service Type":"API Management","Service Name":"soc-watchtower-api","Protocol":"HTTP/1.1","Service ID":"soc-watchtower-api","Cache":"None","Method":"GET"}
-customMeasurements
-{"Client Time (in ms)":0,"Gateway Time (in ms)":0,"Authentication Tokens Time (in ms)":0,"Backend Time (in ms)":1258,"Cache Time (in ms)":0}
+{"Request Size":3455,"Client Time (in ms)":0,"Response Size":1507}
 operation_Name
 soc-watchtower-backend-dev;rev=1 - get-document-filters
 operation_Id
-2365bd30-48795c2d9ddf84ba
+2365bd6d-48795c2d9ddf84ba
 operation_ParentId
-|2365bd30-48795c2d9ddf84ba.
+2365bd6d-48795c2d9ddf84ba
 client_Type
 PC
 client_IP
 0.0.0.0
 client_City
-Singapore
+Chennai
 client_StateOrProvince
-Central Singapore
+Tamil Nadu
 client_CountryOrRegion
-Singapore
+India
 cloud_RoleName
 soc-watchtower-api Southeast Asia
 cloud_RoleInstance
@@ -306,22 +60,186 @@ iKey
 sdkVersion
 apim:0.52.4150.0
 itemId
-6defb12f-a6a1-11f1-aa9f-002248594f58
+6e521254-a6a1-11f1-aa9f-00224856aeb3
 itemCount
 1
 _ResourceId
 /subscriptions/0c123281-74e2-43d2-bbc3-8526be0786bc/resourcegroups/appsvc_linux_southeastasia_basic/providers/microsoft.insights/components/soc-watchtower-backend
-9/2/2026, 1:09:00.668 PM
-|2365bd31-48795c2d9ddf84ba.2365bd33_
-https://soc-watchtower-backend-dev-epfsh5f4fcbgbsd4.southeastasia-01.azurewebsites.net | cid-v1:
-HTTP
-GET /api/docs/stats
-GET - https://soc-watchtower-backend-dev-epfsh5f4fcbgbsd4.southeastasia-01.azurewebsites.net/api/docs/stats
+timestamp [UTC]
+2026-09-02T07:39:21.9771678Z
+id
+|2365bd70-48795c2d9ddf84ba.
+name
+GET /dev/api/docs/stats
+url
+https://soc-watchtower-api.azure-api.net/dev/api/docs/stats
+success
+False
+resultCode
+500
+duration
+347.518
+performanceBucket
+250ms-500ms
+itemType
+request
+customDimensions
+{"Region":"Southeast Asia","HTTP Method":"GET","Service Type":"API Management","Service Name":"soc-watchtower-api","Request Id":"ddc7837e-d125-4bc3-b09d-44053ea1d28a","Service ID":"soc-watchtower-api","Cache":"None","API Revision":"1","API Type":"http","API Name":"soc-watchtower-backend-dev","Operation Name":"get-stats"}
+customMeasurements
+{"Request Size":3449,"Client Time (in ms)":0,"Response Size":1563}
+operation_Name
+soc-watchtower-backend-dev;rev=1 - get-stats
+operation_Id
+2365bd70-48795c2d9ddf84ba
+operation_ParentId
+2365bd70-48795c2d9ddf84ba
+client_Type
+PC
+client_IP
+0.0.0.0
+client_City
+Chennai
+client_StateOrProvince
+Tamil Nadu
+client_CountryOrRegion
+India
+cloud_RoleName
+soc-watchtower-api Southeast Asia
+cloud_RoleInstance
+soc-watchtower-api Southeast Asia
+appId
+a98599fb-5cfa-4c20-81e3-0b7cfb9b34c6
+appName
+/subscriptions/0c123281-74e2-43d2-bbc3-8526be0786bc/resourcegroups/appsvc_linux_southeastasia_basic/providers/microsoft.insights/components/soc-watchtower-backend
+iKey
+79a3c5e2-8bc6-4905-a318-3385621406cb
+sdkVersion
+apim:0.52.4150.0
+itemId
+6e521257-a6a1-11f1-aa9f-00224856aeb3
+itemCount
+1
+_ResourceId
+/subscriptions/0c123281-74e2-43d2-bbc3-8526be0786bc/resourcegroups/appsvc_linux_southeastasia_basic/providers/microsoft.insights/components/soc-watchtower-backend
+timestamp [UTC]
+2026-09-02T07:39:22.3481057Z
+id
+|2365bd73-48795c2d9ddf84ba.
+name
+GET /dev/api/docs/bulk
+url
+https://soc-watchtower-api.azure-api.net/dev/api/docs/bulk
+success
+False
+resultCode
+500
+duration
+385.8371
+performanceBucket
+250ms-500ms
+itemType
+request
+customDimensions
+{"Region":"Southeast Asia","HTTP Method":"GET","Service Type":"API Management","Service Name":"soc-watchtower-api","Request Id":"5e4f3fb7-9176-4779-b094-ac233e0a624b","Service ID":"soc-watchtower-api","Cache":"None","API Revision":"1","API Type":"http","API Name":"soc-watchtower-backend-dev","Operation Name":"get-bulk"}
+customMeasurements
+{"Request Size":3557,"Client Time (in ms)":0,"Response Size":1576}
+operation_Name
+soc-watchtower-backend-dev;rev=1 - get-bulk
+operation_Id
+2365bd73-48795c2d9ddf84ba
+operation_ParentId
+2365bd73-48795c2d9ddf84ba
+client_Type
+PC
+client_IP
+0.0.0.0
+client_City
+Chennai
+client_StateOrProvince
+Tamil Nadu
+client_CountryOrRegion
+India
+cloud_RoleName
+soc-watchtower-api Southeast Asia
+cloud_RoleInstance
+soc-watchtower-api Southeast Asia
+appId
+a98599fb-5cfa-4c20-81e3-0b7cfb9b34c6
+appName
+/subscriptions/0c123281-74e2-43d2-bbc3-8526be0786bc/resourcegroups/appsvc_linux_southeastasia_basic/providers/microsoft.insights/components/soc-watchtower-backend
+iKey
+79a3c5e2-8bc6-4905-a318-3385621406cb
+sdkVersion
+apim:0.52.4150.0
+itemId
+6e521258-a6a1-11f1-aa9f-00224856aeb3
+itemCount
+1
+_ResourceId
+/subscriptions/0c123281-74e2-43d2-bbc3-8526be0786bc/resourcegroups/appsvc_linux_southeastasia_basic/providers/microsoft.insights/components/soc-watchtower-backend
+timestamp [UTC]
+2026-09-02T04:53:52.0512194Z
+id
+|2365baf0-48795c2d9ddf84ba.
+name
+GET /dev/api/rule-management/stats/open-prs
+url
+https://soc-watchtower-api.azure-api.net/dev/api/rule-management/stats/open-prs
+success
+False
+resultCode
+500
+duration
+280.3219
+performanceBucket
+250ms-500ms
+itemType
+request
+customDimensions
+{"Region":"Southeast Asia","API Revision":"1","API Type":"http","HTTP Method":"GET","Service Type":"API Management","Service Name":"soc-watchtower-api","Request Id":"5e71680a-bd01-4676-a770-3a9c93946956","Service ID":"soc-watchtower-api","API Name":"soc-watchtower-backend-dev","Cache":"None","Operation Name":"get-open-pr"}
+customMeasurements
+{"Request Size":3505,"Client Time (in ms)":0,"Response Size":1556}
+operation_Name
+soc-watchtower-backend-dev;rev=1 - get-open-pr
+operation_Id
+2365baf0-48795c2d9ddf84ba
+operation_ParentId
+2365baf0-48795c2d9ddf84ba
+client_Type
+PC
+client_IP
+0.0.0.0
+client_City
+Govindpuri
+client_StateOrProvince
+Delhi
+client_CountryOrRegion
+India
+cloud_RoleName
+soc-watchtower-api Southeast Asia
+cloud_RoleInstance
+soc-watchtower-api Southeast Asia
+appId
+a98599fb-5cfa-4c20-81e3-0b7cfb9b34c6
+appName
+/subscriptions/0c123281-74e2-43d2-bbc3-8526be0786bc/resourcegroups/appsvc_linux_southeastasia_basic/providers/microsoft.insights/components/soc-watchtower-backend
+iKey
+79a3c5e2-8bc6-4905-a318-3385621406cb
+sdkVersion
+apim:0.52.4150.0
+itemId
+50241b9a-a68a-11f1-aa9d-002248576995
+itemCount
+1
+_ResourceId
+/subscriptions/0c123281-74e2-43d2-bbc3-8526be0786bc/resourcegroups/appsvc_linux_southeastasia_basic/providers/microsoft.insights/components/soc-watchtower-backend
+9/2/2026, 10:23:53.179 AM
+|2365baf2-48795c2d9ddf84ba.
+GET /dev/api/rule-management/stats/open-prs
+https://soc-watchtower-api.azure-api.net/dev/api/rule-management/stats/open-prs
 False
 500
-1101.1655
-1sec-3sec
-dependency
-{"Region":"Southeast Asia","Source":"forward-request","Service Type":"API Management","Service Name":"soc-watchtower-api","Protocol":"HTTP/1.1","Service ID":"soc-watchtower-api","Cache":"None","Method":"GET"}
-1s 639ms
-Display time (UTC+05:30)
+288.3776
+250ms-500ms
+request
+{"Region":"Southeast Asia","API Revision":"1","API Type":"http","HTTP Method":"GET","Service Type":"API Management","Service Name":"soc-watchtower-api","Request Id":"fb0ed60c-d6ea-4ae2-9414-c524954e1953","Service ID":"soc-watchtower-api","API Name":"soc-watchtower-backend-dev","Cache":"None","Operation Name":"get-open-pr"}
