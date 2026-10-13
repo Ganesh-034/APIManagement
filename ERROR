@@ -1,25 +1,27 @@
-import express from "express";
+<policies>
+    <inbound>
+        <base />
 
-const router = express.Router();
+        <!-- TEMPORARY TEST: Manual policy modification -->
+        <set-header name="X-APIM-Manual-Test" exists-action="override">
+            <value>modified-manually-before-pipeline</value>
+        </set-header>
 
-/**
- * @openapi
- * /api/apim-policy-test:
- *   post:
- *     summary: Test APIM policy automation
- *     description: Temporary API for validating policy automation behavior.
- *     operationId: apimPolicyTest
- *     tags:
- *       - APIM Testing
- *     responses:
- *       200:
- *         description: APIM policy test successful
- */
-router.post("/", (req, res) => {
-  res.status(200).json({
-    message: "APIM policy automation test successful",
-    status: "success",
-  });
-});
+        <!-- CORS: allow preflight, expose rate-limit headers to the browser -->
+        <cors>
+            <allowed-origins>
+                <origin>https://demo.soc-watchtower.com</origin>
+            </allowed-origins>
+            <allowed-methods>
+                <method>POST</method>
+                <method>OPTIONS</method>
+                <method>HEAD</method>
+            </allowed-methods>
+            <!-- Keep your existing headers unchanged -->
+        </cors>
 
-export default router;
+        <!-- Keep your existing validate-jwt and rate-limit-by-key unchanged -->
+    </inbound>
+
+    <!-- Keep the remaining sections unchanged -->
+</policies>
