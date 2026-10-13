@@ -1,7 +1,7 @@
 trigger:
   branches:
     include:
-      - feature/apim
+      - development
   paths:
     include:
       - src/**
@@ -10,15 +10,15 @@ trigger:
 pr:
   branches:
     include:
-      - feature/apim
+      - development
 pool:
   vmImage: ubuntu-latest
 variables:
   azureSubscription: AzureServiceConnection
   apimResourceGroup: soc-watchtower-prod
   apimServiceName: soc-watchtower-api
-  apimApiId: soc-watchtower-backend-dev-test
-  apimApiPath: dev-test
+  apimApiId: soc-watchtower-backend-dev
+  apimApiPath: dev
   nodeVersion: 22.x
   minCodeCoverage: 80
   gitleaksVersion: v8.18.3
@@ -1143,58 +1143,37 @@ stages:
               targetPath: $(System.DefaultWorkingDirectory)/reports/trivy.sarif
               artifactName: trivy-presidio
             displayName: Publish Trivy Report
-  
   - stage: APIM_Test
-    displayName: "APIM Automation Test"
+    displayName: APIM Automation Test
     dependsOn:
-        - Build_Watchtower
+      - Build_Watchtower
     condition: succeeded()
 
     jobs:
       - job: Import_APIM
-        displayName: Import and Configure APIM
-    
         steps:
           - checkout: self
-  
+
           - task: DownloadPipelineArtifact@2
-            displayName: Download OpenAPI Artifact
             inputs:
               artifactName: openapi-files
               targetPath: $(Pipeline.Workspace)/openapi
+
           - bash: |
-              set -euo pipefail
-              
-              OPENAPI_FILE="$(Pipeline.Workspace)/openapi/openapi.json"
-              
-              echo "Downloaded OpenAPI files:"
-              find "$(Pipeline.Workspace)/openapi" -type f -print
-              
-              if [ ! -f "${OPENAPI_FILE}" ]; then
-                echo "##vso[task.logissue type=error]OpenAPI file not found: ${OPENAPI_FILE}"
-                exit 1
-              fi
-              
-              if ! jq empty "${OPENAPI_FILE}"; then
-                echo "##vso[task.logissue type=error]OpenAPI file is not valid JSON"
-                exit 1
-              fi
-              
-              PATH_COUNT=$(jq '.paths | length' "${OPENAPI_FILE}")
-              
-              if [ "${PATH_COUNT}" -eq 0 ]; then
-                echo "##vso[task.logissue type=error]OpenAPI file contains no paths"
-                exit 1
-              fi
-              
+              echo "Download OpenAPI files:"
+              find $(Pipeline.Workspace)/openapi -type f
               echo ""
-              echo "OpenAPI information:"
-              jq '.info' "${OPENAPI_FILE}"
-              
+              ls -R $(Pipeline.Workspace)/openapi
+            displayName: Verify OpenAPI Artifact
+
+          - bash: |
+              echo "===OpenAPI Title ==="
+              grep -A5 -B2 '"title"' $(Pipeline.Workspace)/openapi/openapi.json || true
               echo ""
-              echo "OpenAPI path count: ${PATH_COUNT}"
-            displayName: Validate and Inspect OpenAPI
-    
+              echo "openAPI Info"
+              cat $(Pipeline.Workspace)/openapi/openapi.json | jq '.info'
+            displayName: Inspect OpenAPI
+
           - task: AzureCLI@2
             displayName: List Existing APIs
             inputs:
@@ -1202,221 +1181,128 @@ stages:
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
-                set -euo pipefail
-            
                 az apim api list \
-                --resource-group "$(apimResourceGroup)" \
-                --service-name "$(apimServiceName)" \
-                --query "[].{Name:name,Path:path,DisplayName:displayName}" \
-                --output table
-          
-          - task: AzureCLI@2
-            displayName: Detect OpenAPI Changes
-            inputs:
-              azureSubscription: $(azureSubscription)
-              scriptType: bash
-              scriptLocation: inlineScript
-              inlineScript: |
-                set -euo pipefail
-          
-                OPENAPI_FILE="$(Pipeline.Workspace)/openapi/openapi.json"
-                API_VERSION="2024-05-01"
-          
-                SUBSCRIPTION_ID=$(az account show --query id --output tsv)
-                
-                HASH_NAMED_VALUE_ID="openapi-hash-$(apimApiId)"
-                HASH_NAMED_VALUE_ID=$(printf '%s' "${HASH_NAMED_VALUE_ID}" |
-                tr '[:upper:]' '[:lower:]' |
-                sed 's/[^a-z0-9-]/-/g')
-          
-                NAMED_VALUE_URI="https://management.azure.com/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/$(apimResourceGroup)/providers/Microsoft.ApiManagement/service/$(apimServiceName)/namedValues/${HASH_NAMED_VALUE_ID}?api-version=${API_VERSION}"
+                  --resource-group "$(apimResourceGroup)" \
+                  --service-name "$(apimServiceName)" \
+                  -o table
 
-                CANONICAL_OPENAPI="$(Agent.TempDirectory)/openapi-canonical.json"
-          
-                jq --sort-keys --compact-output '.' "${OPENAPI_FILE}" > "${CANONICAL_OPENAPI}"
-          
-                CURRENT_HASH=$(sha256sum "${CANONICAL_OPENAPI}" | awk '{print $1}')
-          
-                DEPLOYED_HASH=$(az rest \
-                  --method GET \
-                  --uri "${NAMED_VALUE_URI}" \
-                  --query "properties.value" \
-                  --output tsv 2>/dev/null || true)
-            
-                echo "Current OpenAPI hash: ${CURRENT_HASH}"
-          
-                if [ -n "${DEPLOYED_HASH}" ]; then
-                  echo "Deployed OpenAPI hash: ${DEPLOYED_HASH}"
-                else
-                  echo "No previously deployed OpenAPI hash was found."
-                fi
-          
-                if [ -n "${DEPLOYED_HASH}" ] &&
-                  [ "${CURRENT_HASH}" = "${DEPLOYED_HASH}" ]; then
-          
-                  echo "OpenAPI is unchanged. APIM import will be skipped."
-                  echo "##vso[task.setvariable variable=OpenApiChanged]false"
-                else
-                  echo "OpenAPI change detected. APIM import is required."
-                  echo "##vso[task.setvariable variable=OpenApiChanged]true"
-                fi
-          
-                echo "##vso[task.setvariable variable=CurrentOpenApiHash;issecret=true]${CURRENT_HASH}"
-                echo "##vso[task.setvariable variable=OpenApiHashNamedValueId]${HASH_NAMED_VALUE_ID}"
-    
           - task: AzureCLI@2
-            displayName: Import Changed OpenAPI
-            condition: and(succeeded(), eq(variables['OpenApiChanged'], 'true'))
+            displayName: Show Current API
+            inputs:
+              azureSubscription: $(azureSubscription)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az apim api show \
+                  --resource-group "$(apimResourceGroup)" \
+                  --service-name "$(apimServiceName)" \
+                  --api-id "$(apimApiId)"
+
+          - task: AzureCLI@2
+            displayName: Import OpenAPI
             inputs:
               azureSubscription: $(azureSubscription)
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
                 set -euo pipefail
-            
+
                 OPENAPI_FILE="$(Pipeline.Workspace)/openapi/openapi.json"
-            
-                echo "Endpoints being imported:"
-            
+
+                echo "====================="
+                echo "OpenAPI being imported:"
+                echo "====================="
+
+                if [ ! -f "$OPENAPI_FILE" ]; then
+                  echo "ERROR: OpenAPI file not found:"
+                  echo "$OPENAPI_FILE"
+                  exit 1
+                fi
+
+                echo ""
+                echo "Endpoints in OpenAPI:"
+
                 jq -r '
                   .paths
                   | to_entries[]
                   | .key as $path
                   | .value
-                  | to_entries[]
-                  | select(
-                    .key == "get" or
-                    .key == "post" or
-                    .key == "put" or
-                    .key == "patch" or
-                    .key == "delete" or
-                    .key == "head" or
-                    .key == "options" or
-                    .key == "trace"
-                  )
-                  | "\(.key | ascii_upcase) \($path)"
-                  ' "${OPENAPI_FILE}"
-            
-                  echo ""
-                  echo "Importing changed OpenAPI into APIM..."
-            
-                  az apim api import \
-                    --resource-group "$(apimResourceGroup)" \
-                    --service-name "$(apimServiceName)" \
-                    --api-id "$(apimApiId)" \
-                    --path "$(apimApiPath)" \
-                    --display-name "$(apimApiId)" \
-                    --specification-format OpenApiJson \
-                    --specification-path "${OPENAPI_FILE}"
-            
-                  echo "OpenAPI import completed successfully."
-          
-          - task: AzureCLI@2
-            displayName: Store Deployed OpenAPI Hash
-            condition: and(succeeded(), eq(variables['OpenApiChanged'], 'true'))
-            inputs:
-              azureSubscription: $(azureSubscription)
-              scriptType: bash
-              scriptLocation: inlineScript
-              inlineScript: |
-                set -euo pipefail
-          
-                API_VERSION="2024-05-01"
-                SUBSCRIPTION_ID=$(az account show --query id --output tsv)
-          
-                NAMED_VALUE_URI="https://management.azure.com/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/$(apimResourceGroup)/providers/Microsoft.ApiManagement/service/$(apimServiceName)/namedValues/$(OpenApiHashNamedValueId)?api-version=${API_VERSION}"
-          
-                BODY_FILE="$(Agent.TempDirectory)/openapi-hash.json"
-          
-                jq -n \
-                  --arg displayName "$(OpenApiHashNamedValueId)" \
-                  --arg value "$(CurrentOpenApiHash)" \
-                    '{
-                    properties: {
-                      displayName: $displayName,
-                      value: $value,
-                      secret: false,
-                      tags: [
-                        "azure-devops",
-                        "openapi-deployment-state"
-                      ]
-                    }
-                  }' > "${BODY_FILE}"
-          
-                az rest \
-                --method PUT \
-                --uri "${NAMED_VALUE_URI}" \
-                --headers "Content-Type=application/json" "If-Match=*" \
-                --body "@${BODY_FILE}" \
-                --output none
-                
-                echo "Deployed OpenAPI hash stored successfully."
-                
+                  | keys[]
+                  | "\(. | ascii_upcase) \($path)"
+                ' "$OPENAPI_FILE"
+
+                echo ""
+                echo "====================="
+                echo "Importing OpenAPI into APIM"
+                echo "====================="
+
+                az apim api import \
+                  --resource-group "$(apimResourceGroup)" \
+                  --service-name "$(apimServiceName)" \
+                  --api-id "$(apimApiId)" \
+                  --path "$(apimApiPath)" \
+                  --display-name "$(apimApiId)" \
+                  --specification-format OpenApiJson \
+                  --specification-path "$OPENAPI_FILE"
+
+                echo ""
+                echo "✅ OpenAPI import completed successfully."
+
           - bash: |
               set -euo pipefail
-            
+
               SCRIPT_FILE="$(Build.SourcesDirectory)/scripts/apply-apim-operation-policies.sh"
               POLICY_FILE="$(Build.SourcesDirectory)/infra/global-policy.xml"
-              
+
               echo "=========================="
               echo "APIM Automation File Validation"
               echo "=========================="
-            
-              if [ ! -f "${SCRIPT_FILE}" ]; then
-                echo "##vso[task.logissue type=error]Script not found: ${SCRIPT_FILE}"
-                exit 1
-              fi
-            
+
+              echo ""
+              echo "Normalizing CRLF -> LF..."
+              sed -i 's/\r$//' "${SCRIPT_FILE}"
+
+              echo "Normalizing policy XML..."
+              sed -i 's/\r$//' "${POLICY_FILE}"
+
+              echo ""
+              echo "Script:"
+              file "${SCRIPT_FILE}"
+
+              echo ""
+              echo "Policy:"
+              file "${POLICY_FILE}"
+
+              echo ""
+              echo "validating bash syntax..."
+              bash -n "${SCRIPT_FILE}"
+
+              echo ""
+              echo "checking polciy file..."
+
               if [ ! -f "${POLICY_FILE}" ]; then
                 echo "##vso[task.logissue type=error]Policy file not found: ${POLICY_FILE}"
                 exit 1
               fi
-            
-              echo "Normalizing line endings and Unicode characters..."
-            
-              sed -i 's/\r$//' "${SCRIPT_FILE}"
-              sed -i 's/\r$//' "${POLICY_FILE}"
-            
-              # Remove UTF-8 BOM if present.
-              sed -i '1s/^\xEF\xBB\xBF//' "${SCRIPT_FILE}"
-              sed -i '1s/^\xEF\xBB\xBF//' "${POLICY_FILE}"
-            
-              # Replace non-breaking spaces with regular spaces
-              sed -i 's/\xC2\xA0/ /g' "${SCRIPT_FILE}"
-              sed -i 's/\xC2\xA0/ /g' "${POLICY_FILE}"
-            
-              echo ""
-              echo "Script file:"
-              file "${SCRIPT_FILE}"
-            
-              echo ""
-              echo "Policy file:"
-              file "${POLICY_FILE}"
-            
-              echo ""
-              echo "Validating Bash syntax..."
-              bash -n "${SCRIPT_FILE}"
-            
-              echo ""
-              echo "Validating policy structure..."
-            
+
               if ! grep -q "<policies>" "${POLICY_FILE}"; then
-                echo "##vso[task.logissue type=error]Invalid APIM policy: policies element not found"
+                echo "##vso[task.logissue type=error]Invalid APIM policy file"
                 exit 1
               fi
-            
+
               if ! grep -q "<allowed-methods>" "${POLICY_FILE}"; then
-                echo "##vso[task.logissue type=error]allowed-methods not found in policy"
+                echo "##vso[task.logissue type=error]allowed-methods not found in policy file: ${POLICY_FILE}"
                 exit 1
               fi
-            
+
               chmod +x "${SCRIPT_FILE}"
-            
-              echo "APIM script and policy validation completed successfully."
+
+              echo ""
+              echo "APIM script and policy file validation completed successfully."
             displayName: Normalize and Validate APIM Script and Policy
-                  
+
           - task: AzureCLI@2
-            displayName: Apply Only Changed Method-Specific Policies
+            displayName: Apply and Verify Method-Specific Policies
             inputs:
               azureSubscription: $(azureSubscription)
               scriptType: bash
@@ -1428,7 +1314,7 @@ stages:
               APIM_SERVICE_NAME: $(apimServiceName)
               APIM_API_ID: $(apimApiId)
               APIM_POLICY_FILE: $(Build.SourcesDirectory)/infra/global-policy.xml
-            
+
           - task: AzureCLI@2
             displayName: Verify Imported API
             inputs:
@@ -1436,14 +1322,12 @@ stages:
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
-                set -euo pipefail
-                
                 az apim api show \
-                --resource-group "$(apimResourceGroup)" \
-                --service-name "$(apimServiceName)" \
-                --api-id "$(apimApiId)" \
-                --query "{Name:name,Path:path,DisplayName:displayName}" \
-                --output table
+                  --resource-group "$(apimResourceGroup)" \
+                  --service-name "$(apimServiceName)" \
+                  --api-id "$(apimApiId)" \
+                  --query "{Name:name,Path:path,DisplayName:displayName}" \
+                  -o table
   
   - stage: Deploy_Watchtower
     displayName: Deploy Watchtower
