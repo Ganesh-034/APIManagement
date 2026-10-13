@@ -1,28 +1,17 @@
-    "homeTenantId": "fe8c6234-bf85-48c7-b462-1eefe98d567d",
-    "id": "0c123281-74e2-43d2-bbc3-8526be0786bc",
-    "isDefault": true,
-    "managedByTenants": [],
-    "name": "TTS-SOC-Watchtower(Prod)",
-    "state": "Enabled",
-    "tenantId": "fe8c6234-bf85-48c7-b462-1eefe98d567d",
-    "user": {
-      "name": "***",
-      "type": "servicePrincipal"
-    }
-  }
-]
-/usr/bin/az account set --subscription 0c123281-74e2-43d2-bbc3-8526be0786bc
-/usr/bin/bash /home/vsts/work/_temp/azureclitaskscript1791893897810.sh
-======================================
-Building Watchtower Image
-======================================
-Image: acrsocwatchtowerbackenddev.azurecr.io/soc-watchtower-backend:1021
-Commit: 48cf131
+Retrieving existing operation policy...
+Policy unchanged. Skipping PUT request.
 
-WARNING: Error response from daemon: Get "https://acrsocwatchtowerbackenddev.azurecr.io/v2/": Get "https://acrsocwatchtowerbackenddev.azurecr.io/oauth2/token?account=00000000-0000-0000-0000-000000000000&client_id=docker&offline_token=true&service=acrsocwatchtowerbackenddev.azurecr.io": dial tcp 57.155.172.91:443: connect: connection refused
+==============================================
+APIM Operation Policy Summary
+==============================================
+Total operations:       143
+Policies applied:       1
+Policies unchanged:     141
+Operations excluded:    1
+Policies verified:      142
+Failures:               0
+==============================================
+All applicable operation policies completed successfully.
 
-ERROR: Login failed.
-
-##[error]Script failed with exit code: 1
 /usr/bin/az account clear
-Finishing: Build & Push Image
+Finishing: Apply Only Changed Method-Specific Policies
